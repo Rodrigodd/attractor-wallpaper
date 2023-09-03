@@ -1,0 +1,29 @@
+[package]
+name = "render"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bytemuck = { version = "1.13.1", features = ["derive"] }
+cfg-if = "1.0.0"
+env_logger = "0.10.0"
+image = { version = "0.24.7", default-features = false, features = ["png"] }
+log = "0.4.20"
+pollster = "0.3.0"
+waker-fn = "1.1.0"
+wgpu = "0.17.0"
+winit = "0.28.6"
+attractors = { path = "../attractors" }
+rand = { version = "0.8.5", default-features = false, features = ["std", "small_rng"] }
+
+[target."cfg(target_arch = \"wasm32\")".dependencies]
+console_error_panic_hook = "0.1.7"
+console_log = "1.0.0"
+wasm-bindgen = "0.2.87"
+wasm-bindgen-futures = "0.4.37"
+web-sys = { version = "0.3.64", features = ["Document", "Window", "Element"] }
+wgpu = { version = "0.17.0", features = ["webgl"] }
