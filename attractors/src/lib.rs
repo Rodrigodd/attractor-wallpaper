@@ -134,7 +134,6 @@ impl Attractor {
             }
 
             lyapunov += (d1 / d0).log10();
-            // dbg!((p0, pn0, p1, pn1, d0, d1, lyapunov));
 
             let [dx, dy] = delta(p1, pn1);
 
@@ -191,7 +190,7 @@ impl Attractor {
         [min_x, max_x, min_y, max_y]
     }
 
-    fn get_points<const N: usize>(&self) -> [[f64; 2]; N] {
+    pub fn get_points<const N: usize>(&self) -> [[f64; 2]; N] {
         let mut p = self.start;
         std::array::from_fn(|_| {
             p = self.step(p);
@@ -312,10 +311,7 @@ pub fn affine_from_pca(points: &[Point]) -> Affine {
         axis1[1] * scale1, axis2[1] * scale2,
     ];
 
-    let affine = (mat, t);
-
-    println!("Affine: {:?}", affine);
-    affine
+    (mat, t)
 }
 
 /// Renders the attractor to a 8-bit grayscale bitmap.
@@ -346,8 +342,6 @@ pub fn render_to_bitmap(
     // println!("{:?}", attractor);
 
     let end_bounds = attractor.get_bounds(512);
-
-    dbg!(bounds, end_bounds, dst);
 
     let mut p = attractor.start;
     let mut max = 0;

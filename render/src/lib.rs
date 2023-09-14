@@ -38,7 +38,7 @@ pub async fn run() {
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let wb = WindowBuilder::new()
-        .with_inner_size(winit::dpi::PhysicalSize::new(600, 600))
+        .with_inner_size(winit::dpi::PhysicalSize::new(512, 512))
         .with_title("My WGPU App");
 
     let wb = { wb.with_name("dev", "") };
@@ -73,6 +73,9 @@ pub async fn run() {
     let event_loop_proxy = event_loop.create_proxy();
 
     let mut render_image = false;
+
+    let mut frame_times = Vec::new();
+    let mut last_frame_time: Option<std::time::Instant> = None;
 
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -147,16 +150,40 @@ pub async fn run() {
                 _ => {}
             },
             Event::RedrawRequested(window_id) if window_id == state.window.id() => {
-                // let attractor = attractors::Attractor::find_strange_attractor(
-                //     rand::rngs::SmallRng::from_entropy(),
-                //     10000,
-                // )
-                // .unwrap();
+                if let Some(last_frame) = last_frame_time {
+                    frame_times.push(last_frame.elapsed());
+                    if frame_times.len() > 30 {
+                        let sum: std::time::Duration = frame_times.iter().sum();
+                        let avg = sum / frame_times.len() as u32;
+                        println!("avg frame time: {:?}", avg);
+                        frame_times.clear();
+                    }
+                }
+                last_frame_time = Some(std::time::Instant::now());
+
                 let img = render_image.then(|| {
                     let rng = rand::rngs::SmallRng::from_entropy();
+
                     let attractor =
                         attractors::Attractor::find_strange_attractor(rng, 1_000_000).unwrap();
+                    let points = attractor.get_points::<512>(); // 4 KiB
+                    let affine = attractors::affine_from_pca(&points);
+                    let attractor = attractor.transform_input(affine);
+                    let bounds = attractor.get_bounds(512);
+                    let border = 15.0;
+                    let width = 512;
+                    let height = 512;
+                    let dst = [
+                        border,
+                        width as f64 - border,
+                        border,
+                        height as f64 - border,
+                    ];
+                    let affine = attractors::map_bounds_affine(dst, bounds);
+                    let attractor = attractor.transform_input(affine);
+
                     println!("attractor: {:?}", attractor);
+
                     let img = attractors::render_to_bitmap(
                         &attractor,
                         state.size.width as usize,
@@ -180,7 +207,7 @@ pub async fn run() {
                     img.expand_palette(&PALETTE, None)
                 });
                 render_image = false;
-                match state.render(img.as_ref()) {
+                match state.render() {
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("{:?}", e);
