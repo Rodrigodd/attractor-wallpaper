@@ -21,7 +21,7 @@ fn vs_main(
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var<storage, read> aggregate_buffer : array<u32>;
+@group(0) @binding(1) var<storage, read> aggregate_buffer : array<i32>;
 
 struct Uniforms {
   screenWidth: u32,

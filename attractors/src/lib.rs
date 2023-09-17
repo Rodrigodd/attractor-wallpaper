@@ -315,31 +315,45 @@ pub fn affine_from_pca(points: &[Point]) -> Affine {
 }
 
 pub trait Num:
-    std::ops::Add + std::ops::AddAssign + Eq + Ord + Copy + std::fmt::Display + std::marker::Sized
+    std::ops::Add
+    + From<i8>
+    + std::ops::AddAssign
+    + Eq
+    + Ord
+    + Copy
+    + std::fmt::Display
+    + std::marker::Sized
 {
     const ZERO: Self;
     const ONE: Self;
     const MAX: Self;
 }
-impl Num for u8 {
+impl Num for i8 {
     const ZERO: Self = 0;
     const ONE: Self = 1;
     const MAX: Self = Self::MAX;
 }
-impl Num for u16 {
+impl Num for i16 {
     const ZERO: Self = 0;
     const ONE: Self = 1;
     const MAX: Self = Self::MAX;
 }
-impl Num for u32 {
+impl Num for i32 {
     const ZERO: Self = 0;
     const ONE: Self = 1;
     const MAX: Self = Self::MAX;
 }
-impl Num for u64 {
+impl Num for i64 {
     const ZERO: Self = 0;
     const ONE: Self = 1;
     const MAX: Self = Self::MAX;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum AntiAliasing {
+    None,
+    Bilinear,
+    Lanczos,
 }
 
 /// Renders the attractor to a 8-bit grayscale bitmap.
@@ -348,6 +362,7 @@ pub fn aggregate_to_bitmap<P: Num>(
     width: usize,
     height: usize,
     samples: usize,
+    anti_aliasing: AntiAliasing,
     buffer: &mut [P],
 ) -> P {
     assert_eq!(buffer.len(), width * height);
@@ -356,30 +371,135 @@ pub fn aggregate_to_bitmap<P: Num>(
     let mut max = P::ZERO;
     for _ in 0..samples {
         p = attractor.step(p);
-
-        let x = p[0] as usize;
-        let y = p[1] as usize;
-
-        if x < width && y < height {
-            let p = &mut buffer[y * width + x];
-            if *p == P::ZERO {
-                *p += P::ONE;
-            }
-            if *p == P::MAX {
-                continue;
-            }
-            *p += P::ONE;
-            if *p > max {
-                max = *p;
-            }
-        } else {
-            // println!("out! {:?}", p);
+        match anti_aliasing {
+            AntiAliasing::None => draw_point(p, width, height, buffer, &mut max),
+            AntiAliasing::Bilinear => draw_point_bilinear(p, width, height, buffer, &mut max),
+            AntiAliasing::Lanczos => draw_point_lanczos::<3, P>(p, width, height, buffer, &mut max),
         }
     }
 
     attractor.start = p;
 
     max
+}
+
+fn draw_point<P: Num>(p: [f64; 2], width: usize, height: usize, buffer: &mut [P], max: &mut P) {
+    let x = p[0] as usize;
+    let y = p[1] as usize;
+
+    if x < width && y < height {
+        let p = &mut buffer[y * width + x];
+        if *p == P::ZERO {
+            *p += P::ONE;
+        }
+        if *p == P::MAX {
+            return;
+        }
+        *p += P::ONE;
+        if *p > *max {
+            *max = *p;
+        }
+    } else {
+        // println!("out! {:?}", p);
+    }
+}
+
+fn draw_point_bilinear<P: Num>(
+    p: [f64; 2],
+    width: usize,
+    height: usize,
+    buffer: &mut [P],
+    max: &mut P,
+) {
+    // anti-aliasing with bilinear interpolation
+    let x0 = p[0].floor() as usize;
+    let y0 = p[1].floor() as usize;
+    let x1 = p[0].ceil() as usize;
+    let y1 = p[1].ceil() as usize;
+
+    let fx = p[0] - x0 as f64;
+    let fy = p[1] - y0 as f64;
+
+    let c0 = (1.0 - fx) * (1.0 - fy);
+    let c1 = fx * (1.0 - fy);
+    let c2 = (1.0 - fx) * fy;
+    let c3 = fx * fy;
+
+    let mut add = |buffer: &mut [P], x, y, c: i8| {
+        let c: P = c.into();
+        if x < width && y < height {
+            let p = &mut buffer[y * width + x];
+            if *p == P::ZERO {
+                *p += c;
+            }
+            if *p == P::MAX {
+                return;
+            }
+            *p += c;
+            if *p > *max {
+                *max = *p;
+            }
+        }
+    };
+
+    add(buffer, x0, y0, (c0 * 64.0) as i8);
+    add(buffer, x1, y0, (c1 * 64.0) as i8);
+    add(buffer, x0, y1, (c2 * 64.0) as i8);
+    add(buffer, x1, y1, (c3 * 64.0) as i8);
+}
+
+/// Draw a anti-aliased point using 2x2 Lanczos kernel.
+fn draw_point_lanczos<const W: usize, P: Num>(
+    p: [f64; 2],
+    width: usize,
+    height: usize,
+    buffer: &mut [P],
+    max: &mut P,
+) {
+    // anti-aliasing with bilinear interpolation
+    let x: [usize; W] = std::array::from_fn(|i| (p[0] - W as f64 / 2.0 + i as f64) as usize);
+    let y: [usize; W] = std::array::from_fn(|i| (p[1] - W as f64 / 2.0 + i as f64) as usize);
+
+    // The lanczos kernel
+    let l = |x: f64| {
+        let a = W as f64 / 2.0;
+        if x == 0.0 {
+            1.0
+        } else if x.abs() < a {
+            let pi_x = x * std::f64::consts::PI;
+            a * pi_x.sin() * (pi_x / a).sin() / (pi_x * pi_x)
+        } else {
+            0.0
+        }
+    };
+
+    let mut add = |buffer: &mut [P], x, y, c: i8| {
+        let c: P = c.into();
+        if x < width && y < height {
+            let p = &mut buffer[y * width + x];
+            if *p == P::ZERO {
+                *p += c;
+            }
+            if *p == P::MAX {
+                return;
+            }
+            *p += c;
+            if *p > *max {
+                *max = *p;
+            }
+        }
+    };
+
+    for y in y {
+        for x in x {
+            let dx = (x as f64 - p[0]).abs();
+            let dy = (y as f64 - p[1]).abs();
+
+            let c = l(dx) * l(dy);
+
+            add(buffer, x, y, (c * 64.0) as i8);
+        }
+    }
 }
 
 #[cfg(test)]

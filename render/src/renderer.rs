@@ -292,7 +292,7 @@ impl Renderer {
             .write_buffer(&self.particles, 0, bytemuck::cast_slice(&content));
     }
 
-    pub fn load_aggragate_buffer(&mut self, buffer: &[u32]) {
+    pub fn load_aggragate_buffer(&mut self, buffer: &[i32]) {
         self.queue
             .write_buffer(&self.aggregate_buffer, 0, bytemuck::cast_slice(buffer));
     }

@@ -16,6 +16,22 @@ enum RenderBackend {
     Gpu,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum AntiAliasing {
+    None,
+    Bilinear,
+    Lanczos,
+}
+impl AntiAliasing {
+    fn into_attractors_antialiasing(self) -> attractors::AntiAliasing {
+        match self {
+            Self::None => attractors::AntiAliasing::None,
+            Self::Bilinear => attractors::AntiAliasing::Bilinear,
+            Self::Lanczos => attractors::AntiAliasing::Lanczos,
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
@@ -26,6 +42,10 @@ pub struct Cli {
     /// Spawn a window in fullscreen mode.
     #[arg(short, long, default_value = "false")]
     fullscreen: bool,
+
+    /// Enable anti-aliasing.
+    #[arg(short, long, default_value = "none")]
+    anti_aliasing: AntiAliasing,
 
     /// The seed to use for the sequence of generated attractors.
     #[arg(short, long)]
@@ -106,13 +126,17 @@ pub async fn run(cli: Cli) {
     let mut frame_times = Vec::new();
     let mut last_frame_time: Option<std::time::Instant> = None;
 
-    let mut seed = rand::rngs::OsRng.gen();
+    let mut seed = if let Some(seed) = cli.seed {
+        seed
+    } else {
+        rand::rngs::OsRng.gen()
+    };
     let gen_attractor = |width, height, seed: u64| {
         let rng = rand::rngs::SmallRng::seed_from_u64(seed);
         let border = 15.0;
 
         let attractor = attractor_within_border(rng, border, width, height);
-        let bitmap = vec![0u32; width * height];
+        let bitmap = vec![0i32; width * height];
         (attractor, bitmap, 0u64)
     };
 
@@ -258,6 +282,7 @@ pub async fn run(cli: Cli) {
                         state.size.width as usize,
                         state.size.height as usize,
                         samples,
+                        cli.anti_aliasing.into_attractors_antialiasing(),
                         &mut bitmap,
                     );
                     total_samples += samples as u64;

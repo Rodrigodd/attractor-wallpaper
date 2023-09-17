@@ -1,5 +1,5 @@
 @group(0) @binding(0) var<uniform> uniforms : Uniforms;
-@group(0) @binding(1) var<storage, read_write> aggregate_buffer : array<atomic<u32>>;
+@group(0) @binding(1) var<storage, read_write> aggregate_buffer : array<atomic<i32>>;
 @group(0) @binding(2) var<storage, read_write> particles : array<vec2<f32>>;
 @group(0) @binding(3) var<uniform> attractor : Attractor;
 
@@ -52,8 +52,8 @@ fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
         let i = y * uniforms.screenWidth + x;
 
         if (x < uniforms.screenWidth && y < uniforms.screenHeight) {
-            let n = atomicAdd(&aggregate_buffer[i], 1u);
-            atomicMax(&aggregate_buffer[0], n + 1u);
+            let n = atomicAdd(&aggregate_buffer[i], 1);
+            atomicMax(&aggregate_buffer[0], n + 1);
         }
     }
     particles[index] = particle;
