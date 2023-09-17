@@ -22,6 +22,10 @@ pub struct Cli {
     /// The backend to use for rendering.
     #[arg(short, long, default_value = "cpu")]
     backend: RenderBackend,
+
+    /// Spawn a window in fullscreen mode.
+    #[arg(short, long, default_value = "false")]
+    fullscreen: bool,
 }
 
 mod renderer;
@@ -59,6 +63,12 @@ pub async fn run(cli: Cli) {
         .with_title("My WGPU App");
 
     let wb = { wb.with_name("dev", "") };
+
+    let wb = if cli.fullscreen {
+        wb.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)))
+    } else {
+        wb
+    };
 
     let window = wb.build(&event_loop).unwrap();
 
