@@ -26,12 +26,13 @@ fn vs_main(
 struct Uniforms {
   screenWidth: u32,
   screenHeight: u32,
+  color_scale: f32,
 };
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let i = u32(in.tex_coords.y * f32(uniforms.screenHeight)) * uniforms.screenWidth + u32(in.tex_coords.x * f32(uniforms.screenWidth)) ;
-    let v = f32(aggregate_buffer[i]) / 255.0;
+    let v = f32(aggregate_buffer[i]) / (f32(aggregate_buffer[0]) * 0.5);
     return colormap(v);
 }
 

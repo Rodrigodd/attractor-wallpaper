@@ -19,6 +19,7 @@ wgpu = "0.17.0"
 winit = "0.28.6"
 attractors = { path = "../attractors" }
 rand = { version = "0.8.5", default-features = false, features = ["std", "small_rng"] }
+clap = { version = "4.4.3", features = ["derive"] }
 
 [target."cfg(target_arch = \"wasm32\")".dependencies]
 console_error_panic_hook = "0.1.7"

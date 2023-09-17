@@ -18,9 +18,9 @@ pub enum Behavior {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Attractor {
-    a: [f64; 6],
-    b: [f64; 6],
-    start: Point,
+    pub a: [f64; 6],
+    pub b: [f64; 6],
+    pub start: Point,
 }
 impl Attractor {
     pub fn random(mut rng: impl rand::RngCore) -> Self {
@@ -314,37 +314,46 @@ pub fn affine_from_pca(points: &[Point]) -> Affine {
     (mat, t)
 }
 
+pub trait Num:
+    std::ops::Add + std::ops::AddAssign + Eq + Ord + Copy + std::fmt::Display + std::marker::Sized
+{
+    const ZERO: Self;
+    const ONE: Self;
+    const MAX: Self;
+}
+impl Num for u8 {
+    const ZERO: Self = 0;
+    const ONE: Self = 1;
+    const MAX: Self = Self::MAX;
+}
+impl Num for u16 {
+    const ZERO: Self = 0;
+    const ONE: Self = 1;
+    const MAX: Self = Self::MAX;
+}
+impl Num for u32 {
+    const ZERO: Self = 0;
+    const ONE: Self = 1;
+    const MAX: Self = Self::MAX;
+}
+impl Num for u64 {
+    const ZERO: Self = 0;
+    const ONE: Self = 1;
+    const MAX: Self = Self::MAX;
+}
+
 /// Renders the attractor to a 8-bit grayscale bitmap.
-pub fn render_to_bitmap(
-    attractor: &Attractor,
+pub fn aggregate_to_bitmap<P: Num>(
+    attractor: &mut Attractor,
     width: usize,
     height: usize,
     samples: usize,
-) -> Vec<u8> {
-    let mut buffer = vec![0u8; width * height];
-
-    let points = attractor.get_points::<512>(); // 4 KiB
-    let affine = affine_from_pca(&points);
-    let attractor = attractor.transform_input(affine);
-    // println!("{:?}", attractor);
-
-    let bounds = attractor.get_bounds(512);
-
-    let border = 15.0;
-    let dst = [
-        border,
-        width as f64 - border,
-        border,
-        height as f64 - border,
-    ];
-    let affine = map_bounds_affine(dst, bounds);
-    let attractor = attractor.transform_input(affine);
-    // println!("{:?}", attractor);
-
-    let end_bounds = attractor.get_bounds(512);
+    buffer: &mut [P],
+) -> P {
+    assert_eq!(buffer.len(), width * height);
 
     let mut p = attractor.start;
-    let mut max = 0;
+    let mut max = P::ZERO;
     for _ in 0..samples {
         p = attractor.step(p);
 
@@ -353,21 +362,24 @@ pub fn render_to_bitmap(
 
         if x < width && y < height {
             let p = &mut buffer[y * width + x];
-            if *p == 0 {
-                *p = 25;
+            if *p == P::ZERO {
+                *p += P::ONE;
             }
-            *p = p.saturating_add(1);
+            if *p == P::MAX {
+                continue;
+            }
+            *p += P::ONE;
             if *p > max {
                 max = *p;
             }
         } else {
-            println!("out! {:?} {:?}", p, end_bounds);
+            // println!("out! {:?}", p);
         }
     }
 
-    println!("max: {}", max);
+    attractor.start = p;
 
-    buffer
+    max
 }
 
 #[cfg(test)]
@@ -432,20 +444,6 @@ mod test {
 
         std::fs::write("scatter.svg", svg).unwrap();
         panic!("writed to scatter.svg");
-    }
-
-    #[test]
-    #[ignore]
-    fn render_to_png_test() {
-        let mut rng = rand::rngs::SmallRng::from_entropy();
-        let attractor = Attractor::find_strange_attractor(&mut rng, 1000).unwrap();
-        let img = render_to_bitmap(&attractor, 512, 512, 1_000_000);
-
-        image::GrayImage::from_raw(512, 512, img)
-            .unwrap()
-            .save("scatter.png")
-            .unwrap();
-        panic!("writed to scatter.png");
     }
 
     /// Plot a histogram of the given data.

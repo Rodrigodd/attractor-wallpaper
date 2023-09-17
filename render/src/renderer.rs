@@ -14,19 +14,24 @@ use wgpu::{
 };
 use winit::window::Window;
 
-const NUM_OF_PARTICLES: u32 = (1 << 10) / 10;
+const NUM_OF_PARTICLES: u32 = 512;
 
 pub struct Renderer {
     surface: Surface,
     device: Device,
     queue: Queue,
-    _config: SurfaceConfiguration,
+    config: SurfaceConfiguration,
     pub size: winit::dpi::PhysicalSize<u32>,
     // SAFETY: window must come after surface, because surface must be dropped before window.
     pub window: Window,
     render_pipeline: RenderPipeline,
     compute_pipeline: wgpu::ComputePipeline,
     bind_group: BindGroup,
+    aggregate_buffer: wgpu::Buffer,
+    uniforms_buffer: wgpu::Buffer,
+    bind_group_layout: wgpu::BindGroupLayout,
+    particles: wgpu::Buffer,
+    attractor_buffer: wgpu::Buffer,
 }
 
 impl Renderer {
@@ -86,7 +91,7 @@ impl Renderer {
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: surface_caps.present_modes[0],
+            present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
         };
@@ -101,34 +106,36 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
-        let particles = device.create_buffer_init(&BufferInitDescriptor {
+        let particles = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
+            size: NUM_OF_PARTICLES as u64 * 2 * 4,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
-            contents: bytemuck::cast_slice(&std::array::from_fn::<
-                [f32; 2],
-                { NUM_OF_PARTICLES as usize },
-                _,
-            >(|i| {
-                let sx = -0.104196064;
-                let sy = -0.68416643;
-                let w = (NUM_OF_PARTICLES as f32).sqrt().ceil() as usize;
-                let dx = (i % w) as f32 / w as f32 * 0.01;
-                let dy = (i / w) as f32 / w as f32 * 0.01;
-                [sx + dx, sy + dy]
-            })),
+            mapped_at_creation: false,
         });
 
         let uniforms = Uniforms {
             screen_width: size.width,
             screen_height: size.height,
+            color_scale: 1.0,
         };
 
         let uniforms_buffer = device.create_buffer_init(&BufferInitDescriptor {
-            label: None,
+            label: Some("uniforms"),
             contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let attractor_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("attractor"),
+            size: 64,
+            usage: wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -167,6 +174,17 @@ impl Renderer {
                     },
                     count: None,
                 },
+                // attractor
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -176,27 +194,14 @@ impl Renderer {
             push_constant_ranges: &[],
         });
 
-        let bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: None,
-            layout: &bind_group_layout,
-            entries: &[
-                // uniform
-                BindGroupEntry {
-                    binding: 0,
-                    resource: uniforms_buffer.as_entire_binding(),
-                },
-                // aggregate_buffer
-                BindGroupEntry {
-                    binding: 1,
-                    resource: aggregate_buffer.as_entire_binding(),
-                },
-                // particles
-                BindGroupEntry {
-                    binding: 2,
-                    resource: particles.as_entire_binding(),
-                },
-            ],
-        });
+        let bind_group = create_bind_group(
+            &device,
+            &bind_group_layout,
+            &uniforms_buffer,
+            &aggregate_buffer,
+            &particles,
+            &attractor_buffer,
+        );
 
         let compute_pipeline = create_compute_pipeline(&device, &pipeline_layout)?;
         let render_pipeline = create_render_pipeline(&device, &config, &pipeline_layout)?;
@@ -205,12 +210,17 @@ impl Renderer {
             surface,
             device,
             queue,
-            _config: config,
+            config,
             size,
             window,
             render_pipeline,
             compute_pipeline,
             bind_group,
+            aggregate_buffer,
+            uniforms_buffer,
+            bind_group_layout,
+            particles,
+            attractor_buffer,
         })
     }
 
@@ -219,12 +229,75 @@ impl Renderer {
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        if new_size.width > 0 && new_size.height > 0 {
-            todo!()
+        if new_size.width == 0 && new_size.height == 0 {
+            return;
         }
+
+        if new_size == self.size {
+            return;
+        }
+
+        self.size = new_size;
+
+        self.config.width = new_size.width;
+        self.config.height = new_size.height;
+
+        self.surface.configure(&self.device, &self.config);
+
+        self.aggregate_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: new_size.width as u64 * new_size.height as u64 * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        self.bind_group = create_bind_group(
+            &self.device,
+            &self.bind_group_layout,
+            &self.uniforms_buffer,
+            &self.aggregate_buffer,
+            &self.particles,
+            &self.attractor_buffer,
+        );
     }
 
-    pub fn render(&mut self) -> Result<(), SurfaceError> {
+    pub fn load_attractor(&mut self, attractor: &attractors::Attractor) {
+        let attractor = AttractorF32 {
+            a: attractor.a.map(|x| x as f32),
+            b: attractor.b.map(|x| x as f32),
+            start: attractor.start.map(|x| x as f32),
+        };
+
+        self.queue.write_buffer(
+            &self.attractor_buffer,
+            0,
+            bytemuck::cast_slice(&[attractor]),
+        );
+        self.load_particles([attractor.start[0], attractor.start[1]]);
+    }
+
+    pub fn load_particles(&mut self, start: [f32; 2]) {
+        let content = std::array::from_fn::<[f32; 2], { NUM_OF_PARTICLES as usize }, _>(|i| {
+            let sx = start[0];
+            let sy = start[1];
+            let radius = 0.001;
+            let w = (NUM_OF_PARTICLES as f32).sqrt().ceil() as usize;
+            let dx = (i % w) as f32 / w as f32 * radius;
+            let dy = (i / w) as f32 / w as f32 * radius;
+            [sx + dx, sy + dy]
+        });
+        self.queue
+            .write_buffer(&self.particles, 0, bytemuck::cast_slice(&content));
+    }
+
+    pub fn load_aggragate_buffer(&mut self, buffer: &[u32]) {
+        self.queue
+            .write_buffer(&self.aggregate_buffer, 0, bytemuck::cast_slice(buffer));
+    }
+
+    pub fn render(&mut self, compute: bool, color_scale: f32) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?;
 
         let view = output
@@ -237,7 +310,17 @@ impl Renderer {
                 label: Some("Render Encoder"),
             });
 
-        {
+        self.queue.write_buffer(
+            &self.uniforms_buffer,
+            0,
+            bytemuck::cast_slice(&[Uniforms {
+                screen_width: self.size.width,
+                screen_height: self.size.height,
+                color_scale,
+            }]),
+        );
+
+        if compute {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Compute Pass"),
             });
@@ -275,11 +358,56 @@ impl Renderer {
     }
 }
 
+fn create_bind_group(
+    device: &Device,
+    bind_group_layout: &wgpu::BindGroupLayout,
+    uniforms_buffer: &wgpu::Buffer,
+    aggregate_buffer: &wgpu::Buffer,
+    particles: &wgpu::Buffer,
+    attractor_buffer: &wgpu::Buffer,
+) -> BindGroup {
+    device.create_bind_group(&BindGroupDescriptor {
+        label: None,
+        layout: bind_group_layout,
+        entries: &[
+            // uniform
+            BindGroupEntry {
+                binding: 0,
+                resource: uniforms_buffer.as_entire_binding(),
+            },
+            // aggregate_buffer
+            BindGroupEntry {
+                binding: 1,
+                resource: aggregate_buffer.as_entire_binding(),
+            },
+            // particles
+            BindGroupEntry {
+                binding: 2,
+                resource: particles.as_entire_binding(),
+            },
+            // attractor
+            BindGroupEntry {
+                binding: 3,
+                resource: attractor_buffer.as_entire_binding(),
+            },
+        ],
+    })
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
     screen_width: u32,
     screen_height: u32,
+    color_scale: f32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct AttractorF32 {
+    a: [f32; 6],
+    b: [f32; 6],
+    start: [f32; 2],
 }
 
 fn create_compute_pipeline(

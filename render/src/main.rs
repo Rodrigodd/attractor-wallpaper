@@ -1,3 +1,7 @@
+use clap::Parser;
+
 fn main() {
-    pollster::block_on(render::run());
+    let cli = render::Cli::parse();
+
+    pollster::block_on(render::run(cli));
 }
