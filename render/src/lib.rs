@@ -26,6 +26,10 @@ pub struct Cli {
     /// Spawn a window in fullscreen mode.
     #[arg(short, long, default_value = "false")]
     fullscreen: bool,
+
+    /// The seed to use for the sequence of generated attractors.
+    #[arg(short, long)]
+    seed: Option<u64>,
 }
 
 mod renderer;
