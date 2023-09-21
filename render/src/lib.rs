@@ -50,6 +50,11 @@ pub struct Cli {
     /// The seed to use for the sequence of generated attractors.
     #[arg(short, long)]
     seed: Option<u64>,
+
+    /// Render the attractor into a buffer with both dimensions scaled by this factor, and them
+    /// downsample it to the expected size. Used for anti-aliasing.
+    #[arg(short, long, default_value = "1")]
+    multisampling: u8,
 }
 
 mod renderer;
@@ -115,7 +120,7 @@ pub async fn run(cli: Cli) {
             .expect("Couldn't append canvas to document body.");
     }
 
-    let mut some_state = Renderer::new(window)
+    let mut some_state = Renderer::new(window, cli.multisampling)
         .await
         .map_err(|err| log::error!("{}", err))
         .ok();
@@ -131,12 +136,19 @@ pub async fn run(cli: Cli) {
     } else {
         rand::rngs::OsRng.gen()
     };
-    let gen_attractor = |width, height, seed: u64| {
+
+    let gen_attractor = move |width, height, seed: u64| {
         let rng = rand::rngs::SmallRng::seed_from_u64(seed);
         let border = 15.0;
 
-        let attractor = attractor_within_border(rng, border, width, height);
-        let bitmap = vec![0i32; width * height];
+        let multisampling = cli.multisampling as usize;
+        let attractor = attractor_within_border(
+            rng,
+            border * cli.multisampling as f64,
+            width * multisampling,
+            height * multisampling,
+        );
+        let bitmap = vec![0i32; width * multisampling * height * multisampling];
         (attractor, bitmap, 0u64)
     };
 
@@ -174,7 +186,7 @@ pub async fn run(cli: Cli) {
             } => {
                 let window = some_state.take().unwrap().destroy();
                 log::info!("rebuilding renderer...");
-                rebuild_renderer(event_loop_proxy.clone(), window, &mut tasks);
+                rebuild_renderer(event_loop_proxy.clone(), window, &mut tasks, &cli);
                 return;
             }
             _ => (),
@@ -227,7 +239,7 @@ pub async fn run(cli: Cli) {
                     VirtualKeyCode::R => {
                         let window = some_state.take().unwrap().destroy();
                         log::info!("rebuilding renderer...");
-                        rebuild_renderer(event_loop_proxy.clone(), window, &mut tasks);
+                        rebuild_renderer(event_loop_proxy.clone(), window, &mut tasks, &cli);
                     }
                     VirtualKeyCode::NumpadEnter | VirtualKeyCode::Return if modifiers.alt() => {
                         println!("toggling fullscreen");
@@ -279,12 +291,15 @@ pub async fn run(cli: Cli) {
                     let samples = 400_000;
                     let max = attractors::aggregate_to_bitmap(
                         &mut attractor,
-                        state.size.width as usize,
-                        state.size.height as usize,
+                        state.size.width as usize * cli.multisampling as usize,
+                        state.size.height as usize * cli.multisampling as usize,
                         samples,
                         cli.anti_aliasing.into_attractors_antialiasing(),
                         &mut bitmap,
                     );
+                    if max == i32::MAX {
+                        println!("max reached");
+                    }
                     total_samples += samples as u64;
                     bitmap[0] = max;
                     state.load_aggragate_buffer(&bitmap);
@@ -301,7 +316,7 @@ pub async fn run(cli: Cli) {
                             wgpu::SurfaceError::Lost => state.resize(state.size),
                             wgpu::SurfaceError::OutOfMemory => {
                                 let window = some_state.take().unwrap().destroy();
-                                rebuild_renderer(event_loop_proxy.clone(), window, &mut tasks)
+                                rebuild_renderer(event_loop_proxy.clone(), window, &mut tasks, &cli)
                             }
                         }
                     }
@@ -345,9 +360,11 @@ fn rebuild_renderer(
     event_loop_proxy: EventLoopProxy<UserEvent>,
     window: winit::window::Window,
     tasks: &mut WinitExecutor,
+    cli: &Cli,
 ) {
+    let multisampling = cli.multisampling;
     let task = async move {
-        let Ok(renderer) = Renderer::new(window).await.map_err(|err| log::error!("{}", err)) else {
+        let Ok(renderer) = Renderer::new(window,multisampling).await.map_err(|err| log::error!("{}", err)) else {
             return;
         };
         event_loop_proxy

@@ -24,6 +24,7 @@ pub struct Renderer {
     pub size: winit::dpi::PhysicalSize<u32>,
     // SAFETY: window must come after surface, because surface must be dropped before window.
     pub window: Window,
+    multisampling: u8,
     render_pipeline: RenderPipeline,
     compute_pipeline: wgpu::ComputePipeline,
     bind_group: BindGroup,
@@ -35,7 +36,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub async fn new(window: Window) -> Result<Self, Box<dyn Error>> {
+    pub async fn new(window: Window, multisampling: u8) -> Result<Self, Box<dyn Error>> {
         let size = window.inner_size();
 
         let instance = Instance::new(InstanceDescriptor {
@@ -99,7 +100,11 @@ impl Renderer {
 
         let aggregate_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: size.width as u64 * size.height as u64 * 4,
+            size: size.width as u64
+                * multisampling as u64
+                * size.height as u64
+                * multisampling as u64
+                * std::mem::size_of::<u32>() as u64,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
@@ -204,7 +209,8 @@ impl Renderer {
         );
 
         let compute_pipeline = create_compute_pipeline(&device, &pipeline_layout)?;
-        let render_pipeline = create_render_pipeline(&device, &config, &pipeline_layout)?;
+        let render_pipeline =
+            create_render_pipeline(&device, &config, &pipeline_layout, multisampling)?;
 
         Ok(Self {
             surface,
@@ -213,6 +219,7 @@ impl Renderer {
             config,
             size,
             window,
+            multisampling,
             render_pipeline,
             compute_pipeline,
             bind_group,
@@ -246,7 +253,11 @@ impl Renderer {
 
         self.aggregate_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: new_size.width as u64 * new_size.height as u64 * 4,
+            size: self.size.width as u64
+                * self.multisampling as u64
+                * self.size.height as u64
+                * self.multisampling as u64
+                * std::mem::size_of::<u32>() as u64,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
@@ -435,8 +446,11 @@ fn create_render_pipeline(
     device: &Device,
     config: &SurfaceConfiguration,
     pipeline_layout: &wgpu::PipelineLayout,
+    multisampling: u8,
 ) -> Result<RenderPipeline, Box<dyn Error>> {
-    let source = std::fs::read_to_string("render/src/shader.wgsl")?;
+    let mut source = std::fs::read_to_string("render/src/shader.wgsl")?;
+    source = source.replace("MULTISAMPLING", &format!("{}u", multisampling));
+
     let shader = device.create_shader_module(ShaderModuleDescriptor {
         label: Some("Shader"),
         source: ShaderSource::Wgsl(source.into()),

@@ -1,3 +1,4 @@
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(1) tex_coords: vec2<f32>,
@@ -29,11 +30,36 @@ struct Uniforms {
   color_scale: f32,
 };
 
+// MULTISAMPLING here is replaced by a custom preprocessor. This in the future
+// should be replaced by WGSL override constructs, which is not implemented in
+// naga. The code may also be relying in constant propagation, which is also
+// not implemented yet.
+const multisampling: u32 = MULTISAMPLING;
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let i = u32(in.tex_coords.y * f32(uniforms.screenHeight)) * uniforms.screenWidth + u32(in.tex_coords.x * f32(uniforms.screenWidth)) ;
-    let v = f32(aggregate_buffer[i]) / (f32(aggregate_buffer[0]) * 0.5);
-    return colormap(v);
+
+     let i0 = 
+           u32(in.tex_coords.y * f32(uniforms.screenHeight)) * uniforms.screenWidth * (multisampling * multisampling)
+         + u32(in.tex_coords.x * f32(uniforms.screenWidth)) * multisampling;
+
+    // let v = f32(aggregate_buffer[i0]) / (f32(aggregate_buffer[0]) * 0.5);
+    // return colormap(v);
+
+    var c = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+
+    for(var dy = 0u; dy < multisampling; dy++) {
+        let i1 = i0 + dy * uniforms.screenWidth * multisampling;
+        for (var dx = 0u; dx < multisampling; dx++) {
+            let i = i1 + dx;
+            let v = f32(aggregate_buffer[i]) / (f32(aggregate_buffer[0]) * 0.5);
+            c += colormap(v);
+        }
+    }
+    
+    c *= 1.0/f32(multisampling * multisampling);
+
+    return c;
 }
 
 fn colormap(x: f32) -> vec4<f32> {
