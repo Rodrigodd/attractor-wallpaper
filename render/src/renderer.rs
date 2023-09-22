@@ -450,6 +450,7 @@ fn create_render_pipeline(
 ) -> Result<RenderPipeline, Box<dyn Error>> {
     let mut source = std::fs::read_to_string("render/src/shader.wgsl")?;
     source = source.replace("MULTISAMPLING", &format!("{}u", multisampling));
+    source = source.replace("LANCZOS_WIDTH", &format!("{}u", multisampling * 2));
 
     let shader = device.create_shader_module(ShaderModuleDescriptor {
         label: Some("Shader"),
