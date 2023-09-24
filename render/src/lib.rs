@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 use rand::{Rng, SeedableRng};
 use winit::{
@@ -39,7 +41,8 @@ pub struct Cli {
     #[arg(short, long, default_value = "cpu")]
     backend: RenderBackend,
 
-    /// Spawn a window in fullscreen mode.
+    /// Spawn a window in fullscreen mode. In headless mode, make the output image the same size as
+    /// the focused monitor.
     #[arg(short, long, default_value = "false")]
     fullscreen: bool,
 
@@ -55,12 +58,41 @@ pub struct Cli {
     /// downsample it to the expected size. Used for anti-aliasing.
     #[arg(short, long, default_value = "1")]
     multisampling: u8,
+
+    /// Renders in headless mode, and outputs the attractor to the given file.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+
+    /// The dimensions for the rendered attractor, in pixels.
+    #[arg(short, long, default_value = "512x512", value_parser = size_value_parser, conflicts_with = "fullscreen")]
+    dimensions: winit::dpi::PhysicalSize<u32>,
+}
+
+fn size_value_parser(s: &str) -> Result<winit::dpi::PhysicalSize<u32>, String> {
+    let mut parts = s.split('x');
+    let width = parts
+        .next()
+        .ok_or_else(|| "Missing width".to_string())
+        .and_then(|s| {
+            s.parse::<u32>()
+                .map_err(|err| format!("Invalid width: {}", err))
+        })?;
+    let height = parts
+        .next()
+        .ok_or_else(|| "Missing height".to_string())
+        .and_then(|s| {
+            s.parse::<u32>()
+                .map_err(|err| format!("Invalid height: {}", err))
+        })?;
+    Ok(winit::dpi::PhysicalSize::new(width, height))
 }
 
 mod renderer;
 use renderer::Renderer;
 mod executor;
 use executor::WinitExecutor;
+
+use self::renderer::SurfaceState;
 
 fn init_logger() {
     cfg_if::cfg_if! {
@@ -75,14 +107,92 @@ fn init_logger() {
 
 pub enum UserEvent {
     PollTask(executor::TaskId),
-    SetRenderer(Renderer),
+    SetRenderer((Renderer, SurfaceState)),
+}
+
+pub async fn run(mut cli: Cli) {
+    if let Some(output) = cli.output.take() {
+        run_headless(cli, output).await
+    } else {
+        run_windowed(cli).await
+    }
+}
+
+pub async fn run_headless(mut cli: Cli, output: PathBuf) {
+    if cli.fullscreen {
+        let ev = winit::event_loop::EventLoop::new();
+        let monitor = match ev.primary_monitor() {
+            Some(x) => x,
+            None => {
+                let Some(x) = ev.available_monitors().next()else {
+                    println!("ERROR: No monitors found");
+                    return;
+                };
+                println!("WARN: No primary monitor found, falling back to first available monitor");
+                x
+            }
+        };
+        cli.dimensions = monitor.size();
+    }
+
+    let mut renderer = Renderer::new_headless(cli.dimensions, cli.multisampling)
+        .await
+        .unwrap();
+
+    let (mut attractor, mut bitmap, _) = gen_attractor(
+        cli.dimensions.width as usize,
+        cli.dimensions.height as usize,
+        cli.seed.unwrap_or_else(|| rand::rngs::OsRng.gen()),
+        cli.multisampling as usize,
+    );
+
+    let start = std::time::Instant::now();
+
+    let samples = 40_000_000;
+    let max = attractors::aggregate_to_bitmap(
+        &mut attractor,
+        cli.dimensions.width as usize * cli.multisampling as usize,
+        cli.dimensions.height as usize * cli.multisampling as usize,
+        samples,
+        cli.anti_aliasing.into_attractors_antialiasing(),
+        &mut bitmap,
+    );
+
+    println!(
+        "Rendered {} samples in {}s",
+        samples,
+        start.elapsed().as_secs_f32()
+    );
+
+    if max == i32::MAX {
+        println!("max reached");
+    }
+
+    bitmap[0] = max;
+    renderer.load_aggragate_buffer(&bitmap);
+
+    let texture = renderer.new_target_texture(cli.dimensions);
+
+    let view = texture.create_view(&Default::default());
+    renderer.render(cli.backend == RenderBackend::Gpu, 0.0, &view);
+
+    let bitmap = renderer.copy_texture_content(texture);
+
+    image::save_buffer(
+        output,
+        &bitmap,
+        cli.dimensions.width,
+        cli.dimensions.height,
+        image::ColorType::Rgba8,
+    )
+    .unwrap();
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
-pub async fn run(cli: Cli) {
+pub async fn run_windowed(cli: Cli) {
     init_logger();
 
-    log::info!("Initializing window...");
+    log::info!("Initializing window()...");
 
     let mut screen_size = winit::dpi::PhysicalSize::new(768, 512);
 
@@ -106,24 +216,26 @@ pub async fn run(cli: Cli) {
         // Winit prevents sizing with CSS, so we have to set
         // the size manually when on web.
         use winit::dpi::PhysicalSize;
-        window.set_inner_size(PhysicalSize::new(450, 400));
+        window().set_inner_size(PhysicalSize::new(450, 400));
 
         use winit::platform::web::WindowExtWebSys;
         web_sys::window()
             .and_then(|win| win.document())
             .and_then(|doc| {
                 let dst = doc.get_element_by_id("wasm-example")?;
-                let canvas = web_sys::Element::from(window.canvas());
+                let canvas = web_sys::Element::from(window().canvas());
                 dst.append_child(&canvas).ok()?;
                 Some(())
             })
             .expect("Couldn't append canvas to document body.");
     }
 
-    let mut some_state = Renderer::new(window, cli.multisampling)
+    let (mut renderer, surface) = Renderer::new_windowed(window, cli.multisampling)
         .await
         .map_err(|err| log::error!("{}", err))
-        .ok();
+        .unwrap();
+
+    let mut surface = Some(surface);
 
     let mut tasks = WinitExecutor::new(event_loop.create_proxy());
     let event_loop_proxy = event_loop.create_proxy();
@@ -137,37 +249,22 @@ pub async fn run(cli: Cli) {
         rand::rngs::OsRng.gen()
     };
 
-    let gen_attractor = move |width, height, seed: u64| {
-        let rng = rand::rngs::SmallRng::seed_from_u64(seed);
-        let border = 15.0;
-
-        let multisampling = cli.multisampling as usize;
-        let attractor = attractor_within_border(
-            rng,
-            border * cli.multisampling as f64,
-            width * multisampling,
-            height * multisampling,
-        );
-        let bitmap = vec![0i32; width * multisampling * height * multisampling];
-        (attractor, bitmap, 0u64)
-    };
-
     let mut modifiers = ModifiersState::empty();
 
     let (mut attractor, mut bitmap, mut total_samples) = gen_attractor(
         screen_size.width as usize,
         screen_size.height as usize,
         seed,
+        cli.multisampling as usize,
     );
 
-    if let Some(state) = &mut some_state {
-        state.load_attractor(&attractor);
-    }
+    renderer.load_attractor(&attractor);
 
     event_loop.run(move |event, _, control_flow| {
         match event {
-            Event::UserEvent(UserEvent::SetRenderer(renderer)) => {
-                some_state = Some(renderer);
+            Event::UserEvent(UserEvent::SetRenderer((r, s))) => {
+                renderer = r;
+                surface = Some(s);
                 *control_flow = ControlFlow::Poll;
                 return;
             }
@@ -184,14 +281,14 @@ pub async fn run(cli: Cli) {
                     },
                 ..
             } => {
-                let window = some_state.take().unwrap().destroy();
+                let window = surface.take().unwrap().destroy();
                 log::info!("rebuilding renderer...");
                 rebuild_renderer(event_loop_proxy.clone(), window, &mut tasks, &cli);
                 return;
             }
             _ => (),
         };
-        let Some(state) = some_state.as_mut() else {
+        let Some(state) = surface.as_mut() else {
             return;
         };
 
@@ -199,7 +296,7 @@ pub async fn run(cli: Cli) {
             Event::WindowEvent {
                 ref event,
                 window_id,
-            } if window_id == state.window.id() => match event {
+            } if window_id == state.window().id() => match event {
                 &WindowEvent::Resized(physical_size)
                 | WindowEvent::ScaleFactorChanged {
                     new_inner_size: &mut physical_size,
@@ -211,10 +308,12 @@ pub async fn run(cli: Cli) {
                         screen_size.width as usize,
                         screen_size.height as usize,
                         seed,
+                        cli.multisampling as usize,
                     );
 
-                    state.resize(physical_size);
-                    state.load_attractor(&attractor);
+                    renderer.resize(physical_size);
+                    state.resize(physical_size, renderer.device());
+                    renderer.load_attractor(&attractor);
                 }
                 WindowEvent::CloseRequested
                 | WindowEvent::KeyboardInput {
@@ -237,22 +336,22 @@ pub async fn run(cli: Cli) {
                     ..
                 } => match virtual_keycode {
                     VirtualKeyCode::R => {
-                        let window = some_state.take().unwrap().destroy();
+                        let window = surface.take().unwrap().destroy();
                         log::info!("rebuilding renderer...");
                         rebuild_renderer(event_loop_proxy.clone(), window, &mut tasks, &cli);
                     }
                     VirtualKeyCode::NumpadEnter | VirtualKeyCode::Return if modifiers.alt() => {
                         println!("toggling fullscreen");
-                        if state.window.fullscreen().is_some() {
-                            state.window.set_decorations(true);
-                            state.window.set_fullscreen(None);
+                        if state.window().fullscreen().is_some() {
+                            state.window().set_decorations(true);
+                            state.window().set_fullscreen(None);
                         } else {
-                            state.window.set_decorations(false);
+                            state.window().set_decorations(false);
                             state
-                                .window
+                                .window()
                                 .set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
                         }
-                        state.window.set_fullscreen(None);
+                        state.window().set_fullscreen(None);
                     }
                     _ => {}
                 },
@@ -266,13 +365,14 @@ pub async fn run(cli: Cli) {
                         screen_size.width as usize,
                         screen_size.height as usize,
                         seed,
+                        cli.multisampling as usize,
                     );
-                    state.load_attractor(&attractor);
+                    renderer.load_attractor(&attractor);
                     println!("attractor: {:?}", attractor);
                 }
                 _ => {}
             },
-            Event::RedrawRequested(window_id) if window_id == state.window.id() => {
+            Event::RedrawRequested(window_id) if window_id == state.window().id() => {
                 if let Some(last_frame) = last_frame_time {
                     frame_times.push(last_frame.elapsed());
                     if frame_times.len() > 30 {
@@ -289,10 +389,11 @@ pub async fn run(cli: Cli) {
 
                 if let RenderBackend::Cpu = cli.backend {
                     let samples = 400_000;
+                    let size = state.window().inner_size();
                     let max = attractors::aggregate_to_bitmap(
                         &mut attractor,
-                        state.size.width as usize * cli.multisampling as usize,
-                        state.size.height as usize * cli.multisampling as usize,
+                        size.width as usize * cli.multisampling as usize,
+                        size.height as usize * cli.multisampling as usize,
                         samples,
                         cli.anti_aliasing.into_attractors_antialiasing(),
                         &mut bitmap,
@@ -302,20 +403,25 @@ pub async fn run(cli: Cli) {
                     }
                     total_samples += samples as u64;
                     bitmap[0] = max;
-                    state.load_aggragate_buffer(&bitmap);
+                    renderer.load_aggragate_buffer(&bitmap);
                 }
 
-                // match state.render(false, range as f32 / 5000.0) {
-                match state.render(cli.backend == RenderBackend::Gpu, 0.0) {
-                    Ok(_) => {}
+                match state.current_texture() {
+                    Ok(texture) => {
+                        let view = texture.texture.create_view(&Default::default());
+                        renderer.render(cli.backend == RenderBackend::Gpu, 0.0, &view);
+                        texture.present();
+                    }
                     Err(e) => {
                         eprintln!("{:?}", e);
                         match e {
                             wgpu::SurfaceError::Timeout => {}
                             wgpu::SurfaceError::Outdated => {}
-                            wgpu::SurfaceError::Lost => state.resize(state.size),
+                            wgpu::SurfaceError::Lost => {
+                                state.resize(cli.dimensions, renderer.device())
+                            }
                             wgpu::SurfaceError::OutOfMemory => {
-                                let window = some_state.take().unwrap().destroy();
+                                let window = surface.take().unwrap().destroy();
                                 rebuild_renderer(event_loop_proxy.clone(), window, &mut tasks, &cli)
                             }
                         }
@@ -323,12 +429,31 @@ pub async fn run(cli: Cli) {
                 }
             }
             Event::MainEventsCleared => {
-                state.window.request_redraw();
+                state.window().request_redraw();
             }
             Event::UserEvent(UserEvent::PollTask(task_id)) => tasks.poll(task_id),
             _ => {}
         }
     });
+}
+
+fn gen_attractor(
+    width: usize,
+    height: usize,
+    seed: u64,
+    multisampling: usize,
+) -> (attractors::Attractor, Vec<i32>, u64) {
+    let rng = rand::rngs::SmallRng::seed_from_u64(seed);
+    let border = 15.0;
+
+    let attractor = attractor_within_border(
+        rng,
+        border * multisampling as f64,
+        width * multisampling,
+        height * multisampling,
+    );
+    let bitmap = vec![0i32; width * multisampling * height * multisampling];
+    (attractor, bitmap, 0u64)
 }
 
 fn attractor_within_border(
@@ -364,11 +489,11 @@ fn rebuild_renderer(
 ) {
     let multisampling = cli.multisampling;
     let task = async move {
-        let Ok(renderer) = Renderer::new(window,multisampling).await.map_err(|err| log::error!("{}", err)) else {
+        let Ok(( renderer, surface )) = Renderer::new_windowed(window,multisampling).await.map_err(|err| log::error!("{}", err)) else {
             return;
         };
         event_loop_proxy
-            .send_event(UserEvent::SetRenderer(renderer))
+            .send_event(UserEvent::SetRenderer((renderer, surface)))
             .unwrap_or_else(|_| panic!("failed to send event"));
     };
     tasks.spawn(task);

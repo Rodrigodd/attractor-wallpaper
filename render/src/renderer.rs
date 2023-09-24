@@ -9,21 +9,84 @@ use wgpu::{
     PipelineLayoutDescriptor, PolygonMode, PowerPreference, PrimitiveState, PrimitiveTopology,
     Queue, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
     RenderPipelineDescriptor, RequestAdapterOptions, ShaderModuleDescriptor, ShaderSource,
-    ShaderStages, Surface, SurfaceConfiguration, SurfaceError, TextureUsages,
-    TextureViewDescriptor, VertexState,
+    ShaderStages, Surface, SurfaceConfiguration, TextureUsages, VertexState,
 };
 use winit::window::Window;
 
 const NUM_OF_PARTICLES: u32 = 512;
 
-pub struct Renderer {
+pub struct SurfaceState {
     surface: Surface,
+    // SAFETY: window must come after surface, because surface must be dropped before window.
+    window: Window,
+    config: SurfaceConfiguration,
+}
+impl SurfaceState {
+    fn new(window: Window, instance: &Instance) -> Self {
+        let config = SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            width: window.inner_size().width,
+            height: window.inner_size().height,
+            present_mode: wgpu::PresentMode::AutoNoVsync,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+        };
+        Self {
+            // SAFETY: The surface need to be dropped before the window. This is ensured by owning the
+            // window in the struct and by the order of the fields.
+            surface: unsafe { instance.create_surface(&window).unwrap() },
+            window,
+            config,
+        }
+    }
+
+    fn set_configuration(&mut self, adapter: &wgpu::Adapter, device: &Device) {
+        let surface_caps = self.surface.get_capabilities(adapter);
+
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
+
+        self.config = SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: self.window.inner_size().width,
+            height: self.window.inner_size().height,
+            present_mode: wgpu::PresentMode::AutoNoVsync,
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
+        };
+        self.surface.configure(device, &self.config);
+    }
+
+    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>, device: &Device) {
+        self.config.width = new_size.width;
+        self.config.height = new_size.height;
+
+        self.surface.configure(device, &self.config);
+    }
+
+    pub fn destroy(self) -> Window {
+        self.window
+    }
+
+    pub fn window(&self) -> &Window {
+        &self.window
+    }
+
+    pub fn current_texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
+        self.surface.get_current_texture()
+    }
+}
+
+pub struct Renderer {
     device: Device,
     queue: Queue,
-    config: SurfaceConfiguration,
     pub size: winit::dpi::PhysicalSize<u32>,
-    // SAFETY: window must come after surface, because surface must be dropped before window.
-    pub window: Window,
     multisampling: u8,
     render_pipeline: RenderPipeline,
     compute_pipeline: wgpu::ComputePipeline,
@@ -36,27 +99,64 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub async fn new(window: Window, multisampling: u8) -> Result<Self, Box<dyn Error>> {
+    pub async fn new_windowed(
+        window: Window,
+        multisampling: u8,
+    ) -> Result<(Self, SurfaceState), Box<dyn Error>> {
         let size = window.inner_size();
+        Self::new(Some(window), size, multisampling)
+            .await
+            .map(|(renderer, surface)| (renderer, surface.unwrap()))
+    }
 
+    pub async fn new_headless(
+        size: winit::dpi::PhysicalSize<u32>,
+        multisampling: u8,
+    ) -> Result<Self, Box<dyn Error>> {
+        Self::new(None, size, multisampling)
+            .await
+            .map(|(renderer, surface)| {
+                assert!(surface.is_none());
+                renderer
+            })
+    }
+
+    async fn new(
+        window: Option<Window>,
+        size: winit::dpi::PhysicalSize<u32>,
+        multisampling: u8,
+    ) -> Result<(Self, Option<SurfaceState>), Box<dyn Error>> {
         let instance = Instance::new(InstanceDescriptor {
             // backends: Backends::all(),
             backends: Backends::GL,
             dx12_shader_compiler: Default::default(),
         });
 
-        // SAFETY: The surface need to be dropped before the window. This is ensured by owning the
-        // window in the struct and by the order of the fields.
-        let surface = unsafe { instance.create_surface(&window)? };
+        let (mut surface, adapter) = if let Some(window) = window {
+            let surface = SurfaceState::new(window, &instance);
 
-        let adapter = instance
-            .request_adapter(&RequestAdapterOptions {
-                power_preference: PowerPreference::default(),
-                force_fallback_adapter: false,
-                compatible_surface: Some(&surface),
-            })
-            .await
-            .unwrap();
+            let adapter = instance
+                .request_adapter(&RequestAdapterOptions {
+                    power_preference: PowerPreference::default(),
+                    force_fallback_adapter: false,
+                    compatible_surface: Some(&surface.surface),
+                })
+                .await
+                .unwrap();
+
+            (Some(surface), adapter)
+        } else {
+            let adapter = instance
+                .request_adapter(&RequestAdapterOptions {
+                    power_preference: PowerPreference::default(),
+                    force_fallback_adapter: false,
+                    compatible_surface: None,
+                })
+                .await
+                .unwrap();
+
+            (None, adapter)
+        };
 
         let (device, queue) = adapter
             .request_device(
@@ -74,29 +174,12 @@ impl Renderer {
             )
             .await?;
 
-        // device.on_uncaptured_error(Box::new(|e| {
-        //     log::error!("wgpu error: {:?}", e);
-        // }));
-
-        let surface_caps = surface.get_capabilities(&adapter);
-
-        let surface_format = surface_caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| f.is_srgb())
-            .unwrap_or(surface_caps.formats[0]);
-
-        let config = SurfaceConfiguration {
-            usage: TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width: size.width,
-            height: size.height,
-            present_mode: wgpu::PresentMode::AutoNoVsync,
-            alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: vec![],
+        let output_format = if let Some(surface) = &mut surface {
+            surface.set_configuration(&adapter, &device);
+            surface.config.format
+        } else {
+            wgpu::TextureFormat::Rgba8UnormSrgb
         };
-        surface.configure(&device, &config);
 
         let aggregate_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -210,15 +293,12 @@ impl Renderer {
 
         let compute_pipeline = create_compute_pipeline(&device, &pipeline_layout)?;
         let render_pipeline =
-            create_render_pipeline(&device, &config, &pipeline_layout, multisampling)?;
+            create_render_pipeline(&device, output_format, &pipeline_layout, multisampling)?;
 
-        Ok(Self {
-            surface,
+        let renderer = Self {
             device,
             queue,
-            config,
             size,
-            window,
             multisampling,
             render_pipeline,
             compute_pipeline,
@@ -228,11 +308,8 @@ impl Renderer {
             bind_group_layout,
             particles,
             attractor_buffer,
-        })
-    }
-
-    pub fn destroy(self) -> Window {
-        self.window
+        };
+        Ok((renderer, surface))
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -245,11 +322,6 @@ impl Renderer {
         }
 
         self.size = new_size;
-
-        self.config.width = new_size.width;
-        self.config.height = new_size.height;
-
-        self.surface.configure(&self.device, &self.config);
 
         self.aggregate_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -308,13 +380,7 @@ impl Renderer {
             .write_buffer(&self.aggregate_buffer, 0, bytemuck::cast_slice(buffer));
     }
 
-    pub fn render(&mut self, compute: bool, color_scale: f32) -> Result<(), SurfaceError> {
-        let output = self.surface.get_current_texture()?;
-
-        let view = output
-            .texture
-            .create_view(&TextureViewDescriptor::default());
-
+    pub fn render(&mut self, compute: bool, color_scale: f32, view: &wgpu::TextureView) {
         let mut encoder = self
             .device
             .create_command_encoder(&CommandEncoderDescriptor {
@@ -346,7 +412,7 @@ impl Renderer {
             let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     resolve_target: None,
                     ops: Operations {
                         load: LoadOp::Clear(Color::BLACK),
@@ -363,9 +429,95 @@ impl Renderer {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
+    }
 
-        Ok(())
+    pub fn device(&self) -> &Device {
+        &self.device
+    }
+
+    pub fn new_target_texture(&self, dimensions: winit::dpi::PhysicalSize<u32>) -> wgpu::Texture {
+        self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: dimensions.width,
+                height: dimensions.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: TextureUsages::COPY_SRC
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        })
+    }
+
+    pub fn copy_texture_content(&self, texture: wgpu::Texture) -> Vec<u8> {
+        let dimensions = texture.size();
+
+        let align_up = |x, y| ((x + y - 1) / y) * y;
+
+        let bytes_per_row = align_up(
+            dimensions.width * std::mem::size_of::<u32>() as u32,
+            wgpu::COPY_BYTES_PER_ROW_ALIGNMENT,
+        );
+
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: bytes_per_row as u64 * dimensions.height as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+
+        // wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(dimensions.height),
+                },
+            },
+            dimensions,
+        );
+
+        let id = self.queue.submit(std::iter::once(encoder.finish()));
+
+        self.device.poll(wgpu::Maintain::WaitForSubmissionIndex(id));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer.slice(..).map_async(wgpu::MapMode::Read, move |_| {
+            println!("map_async");
+            tx.send(()).unwrap();
+        });
+
+        self.device.poll(wgpu::Maintain::Wait);
+        println!("waited for map_async");
+        rx.recv().unwrap();
+
+        let mut x = buffer.slice(..).get_mapped_range().to_vec();
+
+        // crop padding bytes per row
+        for y in 0..dimensions.height as usize {
+            let src = y * bytes_per_row as usize..(y + 1) * bytes_per_row as usize;
+            let dst = y * dimensions.width as usize * 4;
+            x.copy_within(src, dst);
+        }
+        x.truncate(dimensions.width as usize * dimensions.height as usize * 4);
+
+        x
     }
 }
 
@@ -444,7 +596,7 @@ fn create_compute_pipeline(
 
 fn create_render_pipeline(
     device: &Device,
-    config: &SurfaceConfiguration,
+    format: wgpu::TextureFormat,
     pipeline_layout: &wgpu::PipelineLayout,
     multisampling: u8,
 ) -> Result<RenderPipeline, Box<dyn Error>> {
@@ -469,7 +621,7 @@ fn create_render_pipeline(
             module: &shader,
             entry_point: "fs_main",
             targets: &[Some(ColorTargetState {
-                format: config.format,
+                format,
                 blend: Some(BlendState::REPLACE),
                 write_mask: ColorWrites::ALL,
             })],
