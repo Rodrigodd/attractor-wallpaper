@@ -1,3 +1,6 @@
 [workspace]
 
 members = ["attractors", "render"]
+
+[profile.dev.package."*"]
+opt-level = 3
