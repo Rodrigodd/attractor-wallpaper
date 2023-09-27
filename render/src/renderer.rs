@@ -594,6 +594,115 @@ fn create_compute_pipeline(
     Ok(compute_pipeline_layout)
 }
 
+fn convolution_code(kernel: &[f32], multisampling: u8, side: usize) -> String {
+    // var c = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    let mut code: String = String::new();
+    for j in 0..side {
+        for i in 0..side {
+            let k = kernel[j * side + i];
+            if k == 0.0 {
+                continue;
+            }
+
+            let di = i as i32;
+            let dj = j as i32 * multisampling as i32;
+
+            let v = format!(
+                "aggregate_buffer[i0 + {}u * uniforms.screenWidth + {}u]\n",
+                dj, di
+            );
+            let c = format!(
+                "c += colormap(f32({}) / f32(aggregate_buffer[0])) * {:?};\n",
+                v, k
+            );
+            code.push_str(&c);
+        }
+    }
+    code
+}
+
+fn box_kernel(multisampling: u8) -> (Vec<f32>, usize) {
+    let side = multisampling as usize;
+    let kernel = vec![1.0; side * side];
+    (kernel, side)
+}
+
+fn lanczos_kernel(multisampling: u8, a: u8) -> (Vec<f32>, usize) {
+    use std::f64::consts::PI;
+
+    let m = multisampling as usize;
+    let a = a as usize;
+
+    let side = m * a * 2 - 1;
+    let mut kernel = vec![0.0; side * side];
+
+    let l = |x: f64| {
+        let a = a as f64;
+        if x == 0.0 {
+            1.0
+        } else if x.abs() < a {
+            let pi_x = x * PI;
+            a * pi_x.sin() * (pi_x / a).sin() / (pi_x * pi_x)
+        } else {
+            0.0
+        }
+    };
+
+    // -a..a, 1/m
+    // -a+1/m ..= a-1/m => a*m*2 - 1
+    // 0 -> -a + 1/m
+    // 1 -> -a + 2/m
+    // i -> -a + (i + 1)/m = (i + 1)/m - a = f64(i + 1 - a*m) / f64(m)
+
+    let mut sum = 0.0;
+    for j in 0..side {
+        for i in 0..side {
+            let a = a as i32;
+            let m = m as i32;
+            let x = (i as i32 + 1 - a * m) as f64 / m as f64;
+            let y = (j as i32 + 1 - a * m) as f64 / m as f64;
+            let k = l(x) * l(y);
+            sum += k;
+            kernel[j * side + i] = k as f32;
+        }
+    }
+    for k in kernel.iter_mut() {
+        *k /= sum as f32;
+    }
+
+    (kernel, side)
+}
+
+#[test]
+fn lanczos_kernel_identity() {
+    let (kernel, side) = lanczos_kernel(1, 4);
+    assert_eq!(side, 1 * 4 * 2 - 1);
+    println!("{:.2?}", kernel.chunks(side).collect::<Vec<_>>());
+    for (i, k) in kernel.into_iter().enumerate() {
+        let center = (side / 2 * side) + side / 2;
+        let v = if i == center { 1.0 } else { 0.0 };
+        println!("{k} ~= {v}");
+        assert!((k - v).abs() < 0.0001);
+    }
+}
+
+#[test]
+fn lanczos_kernel_2x() {
+    let (kernel, side) = lanczos_kernel(2, 3);
+    assert_eq!(side, 2 * 1 * 2 - 1);
+
+    println!("{:.2?}", kernel.chunks(side).collect::<Vec<_>>());
+    let expected = [
+        0.05010604, 0.12363171, 0.05010604, //
+        0.12363171, 0.30504901, 0.12363171, //
+        0.05010604, 0.12363171, 0.05010604, //
+    ];
+    for (k, v) in kernel.into_iter().zip(expected.into_iter()) {
+        println!("{k} ~= {v}");
+        assert!((k - v).abs() < 0.0001);
+    }
+}
+
 fn create_render_pipeline(
     device: &Device,
     format: wgpu::TextureFormat,
@@ -603,6 +712,15 @@ fn create_render_pipeline(
     let mut source = std::fs::read_to_string("render/src/shader.wgsl")?;
     source = source.replace("MULTISAMPLING", &format!("{}u", multisampling));
     source = source.replace("LANCZOS_WIDTH", &format!("{}u", multisampling * 2));
+
+    // let (kernel, side) = box_kernel(multisampling);
+    let (kernel, side) = lanczos_kernel(multisampling, 1);
+    source = source.replace(
+        "//CONVOLUTION",
+        &convolution_code(&kernel, multisampling, side),
+    );
+
+    println!("{}", source);
 
     let shader = device.create_shader_module(ShaderModuleDescriptor {
         label: Some("Shader"),

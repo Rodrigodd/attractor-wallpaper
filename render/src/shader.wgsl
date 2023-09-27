@@ -52,29 +52,15 @@ fn lanczos_kernel(x: f32) -> f32 {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
      let i0 = 
-           u32(in.tex_coords.y * f32(uniforms.screenHeight)) * uniforms.screenWidth * multisampling * (multisampling + multisampling / 2u)
-         + u32(in.tex_coords.x * f32(uniforms.screenWidth)) * multisampling + multisampling / 2u;
+           u32(in.tex_coords.y * f32(uniforms.screenHeight)) * uniforms.screenWidth * multisampling * (multisampling)
+         + u32(in.tex_coords.x * f32(uniforms.screenWidth)) * multisampling;
 
     // let v = f32(aggregate_buffer[i0]) / (f32(aggregate_buffer[0]) * 0.5);
     // return colormap(v);
 
     var c = vec4<f32>(0.0, 0.0, 0.0, 0.0);
 
-    // Lanczos filter
-    for(var iy = -i32(lanczos_width); iy < i32(lanczos_width); iy++) {
-        let i1 = i32(i0) + iy * i32(uniforms.screenWidth * multisampling);
-        for (var ix = -i32(lanczos_width); ix < i32(lanczos_width); ix++) {
-            let i = u32(i32(i1) + ix);
-
-            let v = f32(aggregate_buffer[i]) / (f32(aggregate_buffer[0]) * 0.5);
-
-            let dx = f32(ix) / f32(multisampling);
-            let dy = f32(iy) / f32(multisampling);
-            let w = lanczos_kernel(dx) * lanczos_kernel(dy);
-            
-            c += colormap(v) * w;
-        }
-    }
+    //CONVOLUTION
     
     c *= 1.0/c.a;
 
