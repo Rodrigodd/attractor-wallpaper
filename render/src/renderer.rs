@@ -604,11 +604,33 @@ fn convolution_code(kernel: &[f32], multisampling: u8, side: usize) -> String {
                 continue;
             }
 
-            let di = i as i32;
-            let dj = j as i32 * multisampling as i32;
+            // i0 is pointing to the top left sample of the current pixel. So we shift di and j
+            // here apropiately, in such a way that the kernel is centered on the center sample.
+            //
+            // -side /2 => center kernel on the current sample
+            //
+            // + multisampling / 2 => center kernel on the center sample
+
+            let shift = -(side as i32) / 2 + multisampling as i32 / 2;
+
+            // dj must be multiplied by the number of samples per row, which is multisampling *
+            // screenWidth.
+            let di = i as i32 + shift;
+            let dj = (j as i32 + shift) * multisampling as i32;
+
+            let di = if di < 0 {
+                format!("- {}u", -di)
+            } else {
+                format!("+ {}u", di)
+            };
+            let dj = if dj < 0 {
+                format!("- {}u", -dj)
+            } else {
+                format!("+ {}u", dj)
+            };
 
             let v = format!(
-                "aggregate_buffer[i0 + {}u * uniforms.screenWidth + {}u]\n",
+                "aggregate_buffer[i0 {} * uniforms.screenWidth {}]\n",
                 dj, di
             );
             let c = format!(
