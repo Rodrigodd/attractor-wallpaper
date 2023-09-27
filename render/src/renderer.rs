@@ -698,7 +698,7 @@ fn lanczos_kernel(multisampling: u8, a: u8) -> (Vec<f32>, usize) {
 #[test]
 fn lanczos_kernel_identity() {
     let (kernel, side) = lanczos_kernel(1, 4);
-    assert_eq!(side, 1 * 4 * 2 - 1);
+    assert_eq!(side, 4 * 2 - 1);
     println!("{:.2?}", kernel.chunks(side).collect::<Vec<_>>());
     for (i, k) in kernel.into_iter().enumerate() {
         let center = (side / 2 * side) + side / 2;
@@ -711,13 +711,13 @@ fn lanczos_kernel_identity() {
 #[test]
 fn lanczos_kernel_2x() {
     let (kernel, side) = lanczos_kernel(2, 3);
-    assert_eq!(side, 2 * 1 * 2 - 1);
+    assert_eq!(side, 2 * 2 - 1);
 
     println!("{:.2?}", kernel.chunks(side).collect::<Vec<_>>());
     let expected = [
-        0.05010604, 0.12363171, 0.05010604, //
-        0.12363171, 0.30504901, 0.12363171, //
-        0.05010604, 0.12363171, 0.05010604, //
+        0.050106, 0.123632, 0.050106, //
+        0.123632, 0.305049, 0.123632, //
+        0.050106, 0.123632, 0.050106, //
     ];
     for (k, v) in kernel.into_iter().zip(expected.into_iter()) {
         println!("{k} ~= {v}");
@@ -735,8 +735,11 @@ fn create_render_pipeline(
     source = source.replace("MULTISAMPLING", &format!("{}u", multisampling));
     source = source.replace("LANCZOS_WIDTH", &format!("{}u", multisampling * 2));
 
-    // let (kernel, side) = box_kernel(multisampling);
-    let (kernel, side) = lanczos_kernel(multisampling, 1);
+    let (kernel, side) = if multisampling == 1 {
+        box_kernel(multisampling)
+    } else {
+        lanczos_kernel(multisampling, 1)
+    };
     source = source.replace(
         "//CONVOLUTION",
         &convolution_code(&kernel, multisampling, side),
