@@ -361,7 +361,7 @@ pub fn aggregate_to_bitmap<P: Num>(
     attractor: &mut Attractor,
     width: usize,
     height: usize,
-    samples: usize,
+    samples: u64,
     anti_aliasing: AntiAliasing,
     buffer: &mut [P],
 ) -> P {
@@ -381,6 +381,94 @@ pub fn aggregate_to_bitmap<P: Num>(
     attractor.start = p;
 
     max
+}
+
+pub fn generate_thumbnail(attractor: &Attractor) -> [i16; 256 * 256] {
+    const WIDTH: usize = 256;
+    const HEIGHT: usize = 256;
+    let samples = 256 * 256;
+
+    let mut buffer = [0i16; WIDTH * HEIGHT];
+    let mut attractor = *attractor;
+
+    let bounds = attractor.get_bounds(samples);
+
+    assert_eq!(buffer.len(), WIDTH * HEIGHT);
+
+    let mut p = attractor.start;
+    let mut max = 0i16;
+
+    for _ in 0..samples {
+        p = attractor.step(p);
+        let pos = map_bounds(p, bounds, [0.0, WIDTH as f64, 0.0, HEIGHT as f64]);
+        draw_point(pos, WIDTH, HEIGHT, &mut buffer, &mut max);
+    }
+
+    attractor.start = p;
+
+    buffer
+}
+
+fn select_nth(values: &mut [i16], nth: usize) -> i16 {
+    let pivot = values[0];
+
+    let mut last = values.len();
+    let mut i = 0;
+
+    while i < last {
+        if values[i] <= pivot {
+            i += 1;
+            continue;
+        }
+        last -= 1;
+        values.swap(i, last);
+    }
+
+    let j = last - 1;
+    values.swap(0, j);
+
+    match j {
+        _ if j == nth => pivot,
+        _ if j < nth => select_nth(&mut values[j + 1..], nth - (j + 1)),
+        _ => select_nth(&mut values[..j], nth),
+    }
+}
+
+/// Get a reference color intensity of the attractor, to be used as a base for the color range of
+/// the attractor.
+pub fn get_base_intensity(attractor: &Attractor) -> i16 {
+    let mut thumbnail = generate_thumbnail(attractor);
+
+    // compute the median intensity of non-zero values
+    let mut last = thumbnail.len();
+    let mut i = 0;
+    while i < last {
+        if thumbnail[i] > 0 {
+            i += 1;
+            continue;
+        }
+        last -= 1;
+        thumbnail.swap(i, last);
+    }
+
+    ascii_histogram(
+        "thumbnail intensity",
+        &thumbnail.map(|x| x as f64),
+        10.0,
+        false,
+    );
+    ascii_histogram(
+        "thumbnail non-zero intensity",
+        &thumbnail.map(|x| x as f64)[0..last],
+        10.0,
+        false,
+    );
+
+    let m = select_nth(&mut thumbnail[0..last], last * 1 / 4);
+
+    println!("base intensity: {}", m);
+
+    m
 }
 
 fn draw_point<P: Num>(p: [f64; 2], width: usize, height: usize, buffer: &mut [P], max: &mut P) {
@@ -502,6 +590,67 @@ fn draw_point_lanczos<const W: usize, P: Num>(
     }
 }
 
+/// Plot a histogram of the given data.
+/// The bins are show in the vertical axis, and the values as horizontal bars.
+pub fn ascii_histogram(title: &str, data: &[f64], step: f64, log: bool) -> String {
+    let min = *data.iter().min_by(|a, b| a.total_cmp(b)).unwrap();
+    let max = *data.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
+
+    if min.is_nan() || max.is_nan() {
+        return "NaN".to_string();
+    }
+
+    let (min, max) = ((min / step).round() * step, (max / step).round() * step);
+
+    let map = |x: f64| {
+        if log {
+            x.log2().round() as usize
+        } else {
+            ((x - min) / step).round() as usize
+        }
+    };
+
+    let range = map(max) + 1;
+
+    let mut hist = vec![0; range];
+    for &v in data {
+        if v < min || v > max {
+            continue;
+        }
+        let i = map(v);
+        hist[i] += 1;
+    }
+
+    let max_count = *hist.iter().max().unwrap();
+
+    let mut out = format!("     / {}\n", title);
+
+    for (i, &count) in hist.iter().enumerate() {
+        let v = (count as f64 / max_count as f64) * 60.0;
+        let v = v.ceil() as usize;
+        let x = if log {
+            2usize.pow(i as u32) as f64
+        } else {
+            i as f64 * step + min
+        };
+        let digits_after_dot = if log {
+            0
+        } else {
+            -step.log10().ceil() as usize
+        };
+        out.push_str(&format!(
+            "{:5.d$} |{:=>count$}\n",
+            x,
+            "",
+            count = v,
+            d = digits_after_dot
+        ));
+    }
+
+    println!("{}", out);
+    out
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -564,67 +713,6 @@ mod test {
 
         std::fs::write("scatter.svg", svg).unwrap();
         panic!("writed to scatter.svg");
-    }
-
-    /// Plot a histogram of the given data.
-    /// The bins are show in the vertical axis, and the values as horizontal bars.
-    fn ascii_histogram(title: &str, data: &[f64], step: f64, log: bool) -> String {
-        let min = *data.iter().min_by(|a, b| a.total_cmp(b)).unwrap();
-        let max = *data.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
-
-        if min.is_nan() || max.is_nan() {
-            return "NaN".to_string();
-        }
-
-        let (min, max) = ((min / step).round() * step, (max / step).round() * step);
-
-        let map = |x: f64| {
-            if log {
-                x.log2().round() as usize
-            } else {
-                ((x - min) / step).round() as usize
-            }
-        };
-
-        let range = map(max) + 1;
-
-        let mut hist = vec![0; range];
-        for &v in data {
-            if v < min || v > max {
-                continue;
-            }
-            let i = map(v);
-            hist[i] += 1;
-        }
-
-        let max_count = *hist.iter().max().unwrap();
-
-        let mut out = format!("     / {}\n", title);
-
-        for (i, &count) in hist.iter().enumerate() {
-            let v = (count as f64 / max_count as f64) * 60.0;
-            let v = v.ceil() as usize;
-            let x = if log {
-                2usize.pow(i as u32) as f64
-            } else {
-                i as f64 * step + min
-            };
-            let digits_after_dot = if log {
-                0
-            } else {
-                -step.log10().ceil() as usize
-            };
-            out.push_str(&format!(
-                "{:5.d$} |{:=>count$}\n",
-                x,
-                "",
-                count = v,
-                d = digits_after_dot
-            ));
-        }
-
-        println!("{}", out);
-        out
     }
 
     #[test]
@@ -731,5 +819,20 @@ mod test {
         });
 
         assert_eq!(points, points_trans);
+    }
+
+    #[test]
+    fn test_median() {
+        const N: usize = 10;
+        let mut values: [i16; N] = std::array::from_fn(|i| i as i16);
+
+        let mut rng = rand::rngs::SmallRng::seed_from_u64(0x123);
+        for _ in 0..1000 {
+            let nth = rng.gen_range(0..N);
+            values.shuffle(&mut rng);
+            dbg!(&values);
+            let m = select_nth(&mut values, nth);
+            assert_eq!(m, nth as i16);
+        }
     }
 }

@@ -139,28 +139,30 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
         .await
         .unwrap();
 
-    let (mut attractor, mut bitmap, _) = gen_attractor(
-        cli.dimensions.width as usize,
-        cli.dimensions.height as usize,
+    let size = cli.dimensions;
+
+    let (mut attractor, mut bitmap, _, base_intensity) = gen_attractor(
+        size.width as usize,
+        size.height as usize,
         cli.seed.unwrap_or_else(|| rand::rngs::OsRng.gen()),
         cli.multisampling as usize,
     );
 
     let start = std::time::Instant::now();
 
-    let samples = 40_000_000;
+    let total_samples = 400_000_000;
     let max = attractors::aggregate_to_bitmap(
         &mut attractor,
-        cli.dimensions.width as usize * cli.multisampling as usize,
-        cli.dimensions.height as usize * cli.multisampling as usize,
-        samples,
+        size.width as usize * cli.multisampling as usize,
+        size.height as usize * cli.multisampling as usize,
+        total_samples,
         cli.anti_aliasing.into_attractors_antialiasing(),
         &mut bitmap,
     );
 
     println!(
         "Rendered {} samples in {}s",
-        samples,
+        total_samples,
         start.elapsed().as_secs_f32()
     );
 
@@ -168,10 +170,16 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
         println!("max reached");
     }
 
-    bitmap[0] = max;
+    bitmap[0] = get_intensity(
+        base_intensity,
+        total_samples,
+        size,
+        cli.multisampling,
+        cli.anti_aliasing.into_attractors_antialiasing(),
+    );
     renderer.load_aggragate_buffer(&bitmap);
 
-    let texture = renderer.new_target_texture(cli.dimensions);
+    let texture = renderer.new_target_texture(size);
 
     let view = texture.create_view(&Default::default());
     renderer.render(cli.backend == RenderBackend::Gpu, 0.0, &view);
@@ -181,8 +189,8 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
     image::save_buffer(
         output,
         &bitmap,
-        cli.dimensions.width,
-        cli.dimensions.height,
+        size.width,
+        size.height,
         image::ColorType::Rgba8,
     )
     .unwrap();
@@ -251,7 +259,7 @@ pub async fn run_windowed(cli: Cli) {
 
     let mut modifiers = ModifiersState::empty();
 
-    let (mut attractor, mut bitmap, mut total_samples) = gen_attractor(
+    let (mut attractor, mut bitmap, mut total_samples, mut base_intensity) = gen_attractor(
         screen_size.width as usize,
         screen_size.height as usize,
         seed,
@@ -304,7 +312,7 @@ pub async fn run_windowed(cli: Cli) {
                 } => {
                     screen_size = physical_size;
 
-                    (attractor, bitmap, total_samples) = gen_attractor(
+                    (attractor, bitmap, total_samples, base_intensity) = gen_attractor(
                         screen_size.width as usize,
                         screen_size.height as usize,
                         seed,
@@ -361,7 +369,7 @@ pub async fn run_windowed(cli: Cli) {
                     ..
                 } => {
                     seed += 1;
-                    (attractor, bitmap, total_samples) = gen_attractor(
+                    (attractor, bitmap, total_samples, base_intensity) = gen_attractor(
                         screen_size.width as usize,
                         screen_size.height as usize,
                         seed,
@@ -401,8 +409,14 @@ pub async fn run_windowed(cli: Cli) {
                     if max == i32::MAX {
                         println!("max reached");
                     }
-                    total_samples += samples as u64;
-                    bitmap[0] = max;
+                    total_samples += samples;
+                    bitmap[0] = get_intensity(
+                        base_intensity,
+                        total_samples,
+                        size,
+                        cli.multisampling,
+                        cli.anti_aliasing.into_attractors_antialiasing(),
+                    );
                     renderer.load_aggragate_buffer(&bitmap);
                 }
 
@@ -437,12 +451,32 @@ pub async fn run_windowed(cli: Cli) {
     });
 }
 
+fn get_intensity(
+    base_intensity: i16,
+    total_samples: u64,
+    size: winit::dpi::PhysicalSize<u32>,
+    multisampling: u8,
+    antialiasing: attractors::AntiAliasing,
+) -> i32 {
+    let p = match antialiasing {
+        attractors::AntiAliasing::None => 1,
+        attractors::AntiAliasing::Bilinear => 64,
+        attractors::AntiAliasing::Lanczos => 64,
+    };
+
+    (base_intensity as u64 * total_samples * 32 * p
+        / size.width as u64
+        / size.height as u64
+        / multisampling as u64
+        / multisampling as u64) as i32
+}
+
 fn gen_attractor(
     width: usize,
     height: usize,
     seed: u64,
     multisampling: usize,
-) -> (attractors::Attractor, Vec<i32>, u64) {
+) -> (attractors::Attractor, Vec<i32>, u64, i16) {
     let rng = rand::rngs::SmallRng::seed_from_u64(seed);
     let border = 15.0;
 
@@ -453,7 +487,10 @@ fn gen_attractor(
         height * multisampling,
     );
     let bitmap = vec![0i32; width * multisampling * height * multisampling];
-    (attractor, bitmap, 0u64)
+
+    let base_intensity = attractors::get_base_intensity(&attractor);
+
+    (attractor, bitmap, 0u64, base_intensity)
 }
 
 fn attractor_within_border(

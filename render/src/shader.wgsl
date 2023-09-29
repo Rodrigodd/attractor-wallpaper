@@ -55,7 +55,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
            u32(in.tex_coords.y * f32(uniforms.screenHeight)) * uniforms.screenWidth * multisampling * (multisampling)
          + u32(in.tex_coords.x * f32(uniforms.screenWidth)) * multisampling;
 
-    // let v = f32(aggregate_buffer[i0]) / (f32(aggregate_buffer[0]) * 0.5);
+    // let v = f32(aggregate_buffer[i0]) / f32(aggregate_buffer[0]);
     // return colormap(v);
 
     var c = vec4<f32>(0.0, 0.0, 0.0, 0.0);
