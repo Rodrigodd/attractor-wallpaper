@@ -88,9 +88,11 @@ fn size_value_parser(s: &str) -> Result<winit::dpi::PhysicalSize<u32>, String> {
 }
 
 mod renderer;
-use renderer::Renderer;
+use renderer::AttractorRenderer;
 mod executor;
 use executor::WinitExecutor;
+
+use crate::renderer::WgpuState;
 
 use self::renderer::SurfaceState;
 
@@ -107,7 +109,7 @@ fn init_logger() {
 
 pub enum UserEvent {
     PollTask(executor::TaskId),
-    SetRenderer((Renderer, SurfaceState)),
+    RebuildRenderer((WgpuState, SurfaceState, AttractorRenderer)),
 }
 
 pub async fn run(mut cli: Cli) {
@@ -135,9 +137,14 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
         cli.dimensions = monitor.size();
     }
 
-    let mut renderer = Renderer::new_headless(cli.dimensions, cli.multisampling)
-        .await
-        .unwrap();
+    let wgpu_state = WgpuState::new_headless().await.unwrap();
+    let mut renderer = AttractorRenderer::new(
+        &wgpu_state.device,
+        cli.dimensions,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        cli.multisampling,
+    )
+    .unwrap();
 
     let size = cli.dimensions;
 
@@ -177,14 +184,20 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
         cli.multisampling,
         cli.anti_aliasing.into_attractors_antialiasing(),
     );
-    renderer.load_aggragate_buffer(&bitmap);
+    renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
 
-    let texture = renderer.new_target_texture(size);
+    let texture = wgpu_state.new_target_texture(size);
 
     let view = texture.create_view(&Default::default());
-    renderer.render(cli.backend == RenderBackend::Gpu, 0.0, &view);
+    renderer.render(
+        &wgpu_state.device,
+        &wgpu_state.queue,
+        cli.backend == RenderBackend::Gpu,
+        0.0,
+        &view,
+    );
 
-    let bitmap = renderer.copy_texture_content(texture);
+    let bitmap = wgpu_state.copy_texture_content(texture);
 
     image::save_buffer(
         output,
@@ -238,10 +251,15 @@ pub async fn run_windowed(cli: Cli) {
             .expect("Couldn't append canvas to document body.");
     }
 
-    let (mut renderer, surface) = Renderer::new_windowed(window, cli.multisampling)
-        .await
-        .map_err(|err| log::error!("{}", err))
-        .unwrap();
+    let (mut wgpu_state, surface) = WgpuState::new_windowed(window).await.unwrap();
+    let mut renderer = AttractorRenderer::new(
+        &wgpu_state.device,
+        surface.size(),
+        surface.texture_format(),
+        cli.multisampling,
+    )
+    .map_err(|err| log::error!("{}", err))
+    .unwrap();
 
     let mut surface = Some(surface);
 
@@ -266,13 +284,14 @@ pub async fn run_windowed(cli: Cli) {
         cli.multisampling as usize,
     );
 
-    renderer.load_attractor(&attractor);
+    renderer.load_attractor(&wgpu_state.queue, &attractor);
 
     event_loop.run(move |event, _, control_flow| {
         match event {
-            Event::UserEvent(UserEvent::SetRenderer((r, s))) => {
+            Event::UserEvent(UserEvent::RebuildRenderer((w, s, r))) => {
                 renderer = r;
                 surface = Some(s);
+                wgpu_state = w;
                 *control_flow = ControlFlow::Poll;
                 return;
             }
@@ -319,9 +338,9 @@ pub async fn run_windowed(cli: Cli) {
                         cli.multisampling as usize,
                     );
 
-                    renderer.resize(physical_size);
-                    state.resize(physical_size, renderer.device());
-                    renderer.load_attractor(&attractor);
+                    renderer.resize(&wgpu_state.device, physical_size);
+                    state.resize(physical_size, &wgpu_state.device);
+                    renderer.load_attractor(&wgpu_state.queue, &attractor);
                 }
                 WindowEvent::CloseRequested
                 | WindowEvent::KeyboardInput {
@@ -375,7 +394,7 @@ pub async fn run_windowed(cli: Cli) {
                         seed,
                         cli.multisampling as usize,
                     );
-                    renderer.load_attractor(&attractor);
+                    renderer.load_attractor(&wgpu_state.queue, &attractor);
                     println!("attractor: {:?}", attractor);
                 }
                 _ => {}
@@ -417,13 +436,19 @@ pub async fn run_windowed(cli: Cli) {
                         cli.multisampling,
                         cli.anti_aliasing.into_attractors_antialiasing(),
                     );
-                    renderer.load_aggragate_buffer(&bitmap);
+                    renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
                 }
 
                 match state.current_texture() {
                     Ok(texture) => {
                         let view = texture.texture.create_view(&Default::default());
-                        renderer.render(cli.backend == RenderBackend::Gpu, 0.0, &view);
+                        renderer.render(
+                            &wgpu_state.device,
+                            &wgpu_state.queue,
+                            cli.backend == RenderBackend::Gpu,
+                            0.0,
+                            &view,
+                        );
                         texture.present();
                     }
                     Err(e) => {
@@ -432,7 +457,7 @@ pub async fn run_windowed(cli: Cli) {
                             wgpu::SurfaceError::Timeout => {}
                             wgpu::SurfaceError::Outdated => {}
                             wgpu::SurfaceError::Lost => {
-                                state.resize(cli.dimensions, renderer.device())
+                                state.resize(cli.dimensions, &wgpu_state.device)
                             }
                             wgpu::SurfaceError::OutOfMemory => {
                                 let window = surface.take().unwrap().destroy();
@@ -526,11 +551,18 @@ fn rebuild_renderer(
 ) {
     let multisampling = cli.multisampling;
     let task = async move {
-        let Ok(( renderer, surface )) = Renderer::new_windowed(window,multisampling).await.map_err(|err| log::error!("{}", err)) else {
+        let Ok(( wgpu_state, surface )) = WgpuState::new_windowed(window).await.map_err(|err| log::error!("{}", err)) else {
             return;
         };
+        let renderer = AttractorRenderer::new(
+            &wgpu_state.device,
+            surface.size(),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            multisampling,
+        )
+        .unwrap();
         event_loop_proxy
-            .send_event(UserEvent::SetRenderer((renderer, surface)))
+            .send_event(UserEvent::RebuildRenderer((wgpu_state, surface, renderer)))
             .unwrap_or_else(|_| panic!("failed to send event"));
     };
     tasks.spawn(task);

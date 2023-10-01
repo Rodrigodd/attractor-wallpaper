@@ -41,6 +41,14 @@ impl SurfaceState {
         }
     }
 
+    pub fn size(&self) -> winit::dpi::PhysicalSize<u32> {
+        self.window.inner_size()
+    }
+
+    pub fn texture_format(&self) -> wgpu::TextureFormat {
+        self.config.format
+    }
+
     fn set_configuration(&mut self, adapter: &wgpu::Adapter, device: &Device) {
         let surface_caps = self.surface.get_capabilities(adapter);
 
@@ -83,49 +91,26 @@ impl SurfaceState {
     }
 }
 
-pub struct Renderer {
-    device: Device,
-    queue: Queue,
-    pub size: winit::dpi::PhysicalSize<u32>,
-    multisampling: u8,
-    render_pipeline: RenderPipeline,
-    compute_pipeline: wgpu::ComputePipeline,
-    bind_group: BindGroup,
-    aggregate_buffer: wgpu::Buffer,
-    uniforms_buffer: wgpu::Buffer,
-    bind_group_layout: wgpu::BindGroupLayout,
-    particles: wgpu::Buffer,
-    attractor_buffer: wgpu::Buffer,
+pub struct WgpuState {
+    pub adapter: wgpu::Adapter,
+    pub device: Device,
+    pub queue: Queue,
 }
-
-impl Renderer {
-    pub async fn new_windowed(
-        window: Window,
-        multisampling: u8,
-    ) -> Result<(Self, SurfaceState), Box<dyn Error>> {
-        let size = window.inner_size();
-        Self::new(Some(window), size, multisampling)
+impl WgpuState {
+    pub async fn new_windowed(window: Window) -> Result<(Self, SurfaceState), Box<dyn Error>> {
+        Self::new(Some(window))
             .await
             .map(|(renderer, surface)| (renderer, surface.unwrap()))
     }
 
-    pub async fn new_headless(
-        size: winit::dpi::PhysicalSize<u32>,
-        multisampling: u8,
-    ) -> Result<Self, Box<dyn Error>> {
-        Self::new(None, size, multisampling)
-            .await
-            .map(|(renderer, surface)| {
-                assert!(surface.is_none());
-                renderer
-            })
+    pub async fn new_headless() -> Result<Self, Box<dyn Error>> {
+        Self::new(None).await.map(|(renderer, surface)| {
+            assert!(surface.is_none());
+            renderer
+        })
     }
 
-    async fn new(
-        window: Option<Window>,
-        size: winit::dpi::PhysicalSize<u32>,
-        multisampling: u8,
-    ) -> Result<(Self, Option<SurfaceState>), Box<dyn Error>> {
+    async fn new(window: Option<Window>) -> Result<(Self, Option<SurfaceState>), Box<dyn Error>> {
         let instance = Instance::new(InstanceDescriptor {
             // backends: Backends::all(),
             backends: Backends::GL,
@@ -174,13 +159,125 @@ impl Renderer {
             )
             .await?;
 
-        let output_format = if let Some(surface) = &mut surface {
+        if let Some(surface) = surface.as_mut() {
             surface.set_configuration(&adapter, &device);
-            surface.config.format
-        } else {
-            wgpu::TextureFormat::Rgba8UnormSrgb
+        }
+
+        let wgpu_state = Self {
+            adapter,
+            device,
+            queue,
         };
 
+        Ok((wgpu_state, surface))
+    }
+
+    pub fn new_target_texture(&self, dimensions: winit::dpi::PhysicalSize<u32>) -> wgpu::Texture {
+        self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: dimensions.width,
+                height: dimensions.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: TextureUsages::COPY_SRC
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        })
+    }
+
+    pub fn copy_texture_content(&self, texture: wgpu::Texture) -> Vec<u8> {
+        let dimensions = texture.size();
+
+        let align_up = |x, y| ((x + y - 1) / y) * y;
+
+        let bytes_per_row = align_up(
+            dimensions.width * std::mem::size_of::<u32>() as u32,
+            wgpu::COPY_BYTES_PER_ROW_ALIGNMENT,
+        );
+
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: bytes_per_row as u64 * dimensions.height as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+
+        // wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(dimensions.height),
+                },
+            },
+            dimensions,
+        );
+
+        let id = self.queue.submit(std::iter::once(encoder.finish()));
+
+        self.device.poll(wgpu::Maintain::WaitForSubmissionIndex(id));
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer.slice(..).map_async(wgpu::MapMode::Read, move |_| {
+            println!("map_async");
+            tx.send(()).unwrap();
+        });
+
+        self.device.poll(wgpu::Maintain::Wait);
+        println!("waited for map_async");
+        rx.recv().unwrap();
+
+        let mut x = buffer.slice(..).get_mapped_range().to_vec();
+
+        // crop padding bytes per row
+        for y in 0..dimensions.height as usize {
+            let src = y * bytes_per_row as usize..(y + 1) * bytes_per_row as usize;
+            let dst = y * dimensions.width as usize * 4;
+            x.copy_within(src, dst);
+        }
+        x.truncate(dimensions.width as usize * dimensions.height as usize * 4);
+
+        x
+    }
+}
+
+pub struct AttractorRenderer {
+    pub size: winit::dpi::PhysicalSize<u32>,
+    multisampling: u8,
+    render_pipeline: RenderPipeline,
+    compute_pipeline: wgpu::ComputePipeline,
+    bind_group: BindGroup,
+    aggregate_buffer: wgpu::Buffer,
+    uniforms_buffer: wgpu::Buffer,
+    bind_group_layout: wgpu::BindGroupLayout,
+    particles: wgpu::Buffer,
+    attractor_buffer: wgpu::Buffer,
+}
+
+impl AttractorRenderer {
+    pub fn new(
+        device: &Device,
+        size: winit::dpi::PhysicalSize<u32>,
+        output_format: wgpu::TextureFormat,
+        multisampling: u8,
+    ) -> Result<Self, Box<dyn Error>> {
         let aggregate_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: size.width as u64
@@ -283,7 +380,7 @@ impl Renderer {
         });
 
         let bind_group = create_bind_group(
-            &device,
+            device,
             &bind_group_layout,
             &uniforms_buffer,
             &aggregate_buffer,
@@ -291,13 +388,11 @@ impl Renderer {
             &attractor_buffer,
         );
 
-        let compute_pipeline = create_compute_pipeline(&device, &pipeline_layout)?;
+        let compute_pipeline = create_compute_pipeline(device, &pipeline_layout)?;
         let render_pipeline =
-            create_render_pipeline(&device, output_format, &pipeline_layout, multisampling)?;
+            create_render_pipeline(device, output_format, &pipeline_layout, multisampling)?;
 
-        let renderer = Self {
-            device,
-            queue,
+        Ok(Self {
             size,
             multisampling,
             render_pipeline,
@@ -308,11 +403,10 @@ impl Renderer {
             bind_group_layout,
             particles,
             attractor_buffer,
-        };
-        Ok((renderer, surface))
+        })
     }
 
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+    pub fn resize(&mut self, device: &Device, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width == 0 && new_size.height == 0 {
             return;
         }
@@ -323,7 +417,7 @@ impl Renderer {
 
         self.size = new_size;
 
-        self.aggregate_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+        self.aggregate_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: self.size.width as u64
                 * self.multisampling as u64
@@ -337,7 +431,7 @@ impl Renderer {
         });
 
         self.bind_group = create_bind_group(
-            &self.device,
+            device,
             &self.bind_group_layout,
             &self.uniforms_buffer,
             &self.aggregate_buffer,
@@ -346,22 +440,22 @@ impl Renderer {
         );
     }
 
-    pub fn load_attractor(&mut self, attractor: &attractors::Attractor) {
+    pub fn load_attractor(&mut self, queue: &Queue, attractor: &attractors::Attractor) {
         let attractor = AttractorF32 {
             a: attractor.a.map(|x| x as f32),
             b: attractor.b.map(|x| x as f32),
             start: attractor.start.map(|x| x as f32),
         };
 
-        self.queue.write_buffer(
+        queue.write_buffer(
             &self.attractor_buffer,
             0,
             bytemuck::cast_slice(&[attractor]),
         );
-        self.load_particles([attractor.start[0], attractor.start[1]]);
+        self.load_particles(queue, [attractor.start[0], attractor.start[1]]);
     }
 
-    pub fn load_particles(&mut self, start: [f32; 2]) {
+    pub fn load_particles(&mut self, queue: &Queue, start: [f32; 2]) {
         let content = std::array::from_fn::<[f32; 2], { NUM_OF_PARTICLES as usize }, _>(|i| {
             let sx = start[0];
             let sy = start[1];
@@ -371,23 +465,26 @@ impl Renderer {
             let dy = (i / w) as f32 / w as f32 * radius;
             [sx + dx, sy + dy]
         });
-        self.queue
-            .write_buffer(&self.particles, 0, bytemuck::cast_slice(&content));
+        queue.write_buffer(&self.particles, 0, bytemuck::cast_slice(&content));
     }
 
-    pub fn load_aggragate_buffer(&mut self, buffer: &[i32]) {
-        self.queue
-            .write_buffer(&self.aggregate_buffer, 0, bytemuck::cast_slice(buffer));
+    pub fn load_aggragate_buffer(&mut self, queue: &Queue, buffer: &[i32]) {
+        queue.write_buffer(&self.aggregate_buffer, 0, bytemuck::cast_slice(buffer));
     }
 
-    pub fn render(&mut self, compute: bool, color_scale: f32, view: &wgpu::TextureView) {
-        let mut encoder = self
-            .device
-            .create_command_encoder(&CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
+    pub fn render(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        compute: bool,
+        color_scale: f32,
+        view: &wgpu::TextureView,
+    ) {
+        let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("Render Encoder"),
+        });
 
-        self.queue.write_buffer(
+        queue.write_buffer(
             &self.uniforms_buffer,
             0,
             bytemuck::cast_slice(&[Uniforms {
@@ -402,10 +499,7 @@ impl Renderer {
                 label: Some("Compute Pass"),
             });
 
-            compute_pass.set_pipeline(&self.compute_pipeline);
-            compute_pass.set_bind_group(0, &self.bind_group, &[]);
-
-            compute_pass.dispatch_workgroups(NUM_OF_PARTICLES, 1, 1)
+            self.compute_particles(&mut compute_pass);
         }
 
         {
@@ -422,102 +516,24 @@ impl Renderer {
                 depth_stencil_attachment: None,
             });
 
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.bind_group, &[]);
-
-            render_pass.draw(0..3, 0..1);
+            self.render_aggregate_buffer(&mut render_pass);
         }
 
-        self.queue.submit(std::iter::once(encoder.finish()));
+        queue.submit(std::iter::once(encoder.finish()));
     }
 
-    pub fn device(&self) -> &Device {
-        &self.device
+    pub fn compute_particles<'a>(&'a mut self, compute_pass: &mut wgpu::ComputePass<'a>) {
+        compute_pass.set_pipeline(&self.compute_pipeline);
+        compute_pass.set_bind_group(0, &self.bind_group, &[]);
+
+        compute_pass.dispatch_workgroups(NUM_OF_PARTICLES, 1, 1)
     }
 
-    pub fn new_target_texture(&self, dimensions: winit::dpi::PhysicalSize<u32>) -> wgpu::Texture {
-        self.device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: dimensions.width,
-                height: dimensions.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: TextureUsages::COPY_SRC
-                | TextureUsages::COPY_DST
-                | TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        })
-    }
+    pub fn render_aggregate_buffer<'a>(&'a mut self, render_pass: &mut wgpu::RenderPass<'a>) {
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.bind_group, &[]);
 
-    pub fn copy_texture_content(&self, texture: wgpu::Texture) -> Vec<u8> {
-        let dimensions = texture.size();
-
-        let align_up = |x, y| ((x + y - 1) / y) * y;
-
-        let bytes_per_row = align_up(
-            dimensions.width * std::mem::size_of::<u32>() as u32,
-            wgpu::COPY_BYTES_PER_ROW_ALIGNMENT,
-        );
-
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: bytes_per_row as u64 * dimensions.height as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-
-        // wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
-
-        encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::ImageCopyBuffer {
-                buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bytes_per_row),
-                    rows_per_image: Some(dimensions.height),
-                },
-            },
-            dimensions,
-        );
-
-        let id = self.queue.submit(std::iter::once(encoder.finish()));
-
-        self.device.poll(wgpu::Maintain::WaitForSubmissionIndex(id));
-
-        let (tx, rx) = std::sync::mpsc::channel();
-        buffer.slice(..).map_async(wgpu::MapMode::Read, move |_| {
-            println!("map_async");
-            tx.send(()).unwrap();
-        });
-
-        self.device.poll(wgpu::Maintain::Wait);
-        println!("waited for map_async");
-        rx.recv().unwrap();
-
-        let mut x = buffer.slice(..).get_mapped_range().to_vec();
-
-        // crop padding bytes per row
-        for y in 0..dimensions.height as usize {
-            let src = y * bytes_per_row as usize..(y + 1) * bytes_per_row as usize;
-            let dst = y * dimensions.width as usize * 4;
-            x.copy_within(src, dst);
-        }
-        x.truncate(dimensions.width as usize * dimensions.height as usize * 4);
-
-        x
+        render_pass.draw(0..3, 0..1);
     }
 }
 
