@@ -12,5 +12,4 @@ rand = { version = "0.8.5", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-asciigraph = "0.8.0"
 image = { version = "0.24.7", default-features = false, features = ["png"] }
