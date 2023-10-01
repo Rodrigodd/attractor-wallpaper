@@ -464,7 +464,7 @@ pub fn get_base_intensity(attractor: &Attractor) -> i16 {
         false,
     );
 
-    let m = select_nth(&mut thumbnail[0..last], last * 1 / 4);
+    let m = select_nth(&mut thumbnail[0..last], last / 4);
 
     println!("base intensity: {}", m);
 
