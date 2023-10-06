@@ -27,7 +27,6 @@ fn vs_main(
 struct Uniforms {
   screenWidth: u32,
   screenHeight: u32,
-  color_scale: f32,
 };
 
 // MULTISAMPLING here is replaced by a custom preprocessor. This in the future

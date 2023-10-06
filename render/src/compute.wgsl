@@ -6,7 +6,6 @@
 struct Uniforms {
   screenWidth: u32,
   screenHeight: u32,
-  color_scale: f32,
 };
 
 struct Attractor {

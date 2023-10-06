@@ -1,4 +1,3 @@
-use super::UserEvent;
 use std::{
     collections::HashMap,
     future::Future,
@@ -10,16 +9,18 @@ use winit::event_loop::EventLoopProxy;
 
 pub type TaskId = usize;
 
-pub struct WinitExecutor {
+pub struct WinitExecutor<T: 'static> {
     tasks: HashMap<TaskId, Pin<Box<dyn Future<Output = ()>>>>,
-    event_loop_proxy: EventLoopProxy<UserEvent>,
+    event_loop_proxy: EventLoopProxy<T>,
+    poll_event: fn(TaskId) -> T,
 }
-impl WinitExecutor {
+impl<T: Send + Sync> WinitExecutor<T> {
     /// Create a new `WinitExecutor`, driven by the given event loop.
-    pub fn new(event_loop_proxy: EventLoopProxy<UserEvent>) -> Self {
+    pub fn new(event_loop_proxy: EventLoopProxy<T>, poll_event: fn(TaskId) -> T) -> Self {
         Self {
             tasks: HashMap::new(),
             event_loop_proxy,
+            poll_event,
         }
     }
 
@@ -46,12 +47,10 @@ impl WinitExecutor {
     pub fn poll(&mut self, task_id: TaskId) {
         log::trace!("polling task {}", task_id);
         let winit_proxy = Mutex::new(self.event_loop_proxy.clone());
+        let poll_event = self.poll_event;
         let waker = waker_fn::waker_fn(move || {
             log::trace!("waking task {}", task_id);
-            let _ = winit_proxy
-                .lock()
-                .unwrap()
-                .send_event(UserEvent::PollTask(task_id));
+            let _ = winit_proxy.lock().unwrap().send_event(poll_event(task_id));
         });
         let task = self.tasks.get_mut(&task_id).unwrap().as_mut();
         match task.poll(&mut Context::from_waker(&waker)) {

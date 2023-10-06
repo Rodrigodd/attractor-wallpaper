@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use attractors::map_bounds_affine;
 use clap::Parser;
 use rand::{Rng, SeedableRng};
 use winit::{
@@ -19,7 +20,7 @@ enum RenderBackend {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum AntiAliasing {
+enum AntiAliasing {
     None,
     Bilinear,
     Lanczos,
@@ -87,14 +88,13 @@ fn size_value_parser(s: &str) -> Result<winit::dpi::PhysicalSize<u32>, String> {
     Ok(winit::dpi::PhysicalSize::new(width, height))
 }
 
-mod renderer;
-use renderer::AttractorRenderer;
 mod executor;
-use executor::WinitExecutor;
+mod renderer;
 
-use crate::renderer::WgpuState;
-
-use self::renderer::SurfaceState;
+pub use crate::{
+    executor::{TaskId, WinitExecutor},
+    renderer::{AttractorRenderer, SurfaceState, WgpuState},
+};
 
 fn init_logger() {
     cfg_if::cfg_if! {
@@ -107,7 +107,7 @@ fn init_logger() {
     }
 }
 
-pub enum UserEvent {
+enum UserEvent {
     PollTask(executor::TaskId),
     RebuildRenderer((WgpuState, SurfaceState, AttractorRenderer)),
 }
@@ -152,7 +152,7 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
         size.width as usize,
         size.height as usize,
         cli.seed.unwrap_or_else(|| rand::rngs::OsRng.gen()),
-        cli.multisampling as usize,
+        cli.multisampling,
     );
 
     let start = std::time::Instant::now();
@@ -193,7 +193,6 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
         &wgpu_state.device,
         &wgpu_state.queue,
         cli.backend == RenderBackend::Gpu,
-        0.0,
         &view,
     );
 
@@ -263,7 +262,7 @@ pub async fn run_windowed(cli: Cli) {
 
     let mut surface = Some(surface);
 
-    let mut tasks = WinitExecutor::new(event_loop.create_proxy());
+    let mut tasks = WinitExecutor::new(event_loop.create_proxy(), UserEvent::PollTask);
     let event_loop_proxy = event_loop.create_proxy();
 
     let mut frame_times = Vec::new();
@@ -281,7 +280,7 @@ pub async fn run_windowed(cli: Cli) {
         screen_size.width as usize,
         screen_size.height as usize,
         seed,
-        cli.multisampling as usize,
+        cli.multisampling,
     );
 
     renderer.load_attractor(&wgpu_state.queue, &attractor);
@@ -335,7 +334,7 @@ pub async fn run_windowed(cli: Cli) {
                         screen_size.width as usize,
                         screen_size.height as usize,
                         seed,
-                        cli.multisampling as usize,
+                        cli.multisampling,
                     );
 
                     renderer.resize(&wgpu_state.device, physical_size);
@@ -392,7 +391,7 @@ pub async fn run_windowed(cli: Cli) {
                         screen_size.width as usize,
                         screen_size.height as usize,
                         seed,
-                        cli.multisampling as usize,
+                        cli.multisampling,
                     );
                     renderer.load_attractor(&wgpu_state.queue, &attractor);
                     println!("attractor: {:?}", attractor);
@@ -446,7 +445,6 @@ pub async fn run_windowed(cli: Cli) {
                             &wgpu_state.device,
                             &wgpu_state.queue,
                             cli.backend == RenderBackend::Gpu,
-                            0.0,
                             &view,
                         );
                         texture.present();
@@ -476,7 +474,7 @@ pub async fn run_windowed(cli: Cli) {
     });
 }
 
-fn get_intensity(
+pub fn get_intensity(
     base_intensity: i16,
     total_samples: u64,
     size: winit::dpi::PhysicalSize<u32>,
@@ -496,17 +494,20 @@ fn get_intensity(
         / multisampling as u64) as i32
 }
 
-fn gen_attractor(
+pub fn gen_attractor(
     width: usize,
     height: usize,
     seed: u64,
-    multisampling: usize,
+    multisampling: u8,
 ) -> (attractors::Attractor, Vec<i32>, u64, i16) {
     let rng = rand::rngs::SmallRng::seed_from_u64(seed);
-    let border = 15.0;
+    let mut attractor = attractors::Attractor::find_strange_attractor(rng, 1_000_000).unwrap();
 
-    let attractor = attractor_within_border(
-        rng,
+    let border = 15.0;
+    let multisampling = multisampling as usize;
+
+    attractor_to_within_border(
+        &mut attractor,
         border * multisampling as f64,
         width * multisampling,
         height * multisampling,
@@ -518,18 +519,46 @@ fn gen_attractor(
     (attractor, bitmap, 0u64, base_intensity)
 }
 
-fn attractor_within_border(
-    rng: rand::rngs::SmallRng,
+pub fn resize_attractor(
+    attractor: &mut attractors::Attractor,
+    old_size: (usize, usize),
+    new_size: (usize, usize),
+) -> (Vec<i32>, u64) {
+    let border = 0.0;
+
+    let affine = map_bounds_affine(
+        [
+            border,
+            new_size.0 as f64 - border,
+            border,
+            new_size.1 as f64 - border,
+        ],
+        [
+            border,
+            old_size.0 as f64 - border,
+            border,
+            old_size.1 as f64 - border,
+        ],
+    );
+
+    *attractor = attractor.transform_input(affine);
+
+    let bitmap = vec![0i32; new_size.0 * new_size.1];
+
+    (bitmap, 0u64)
+}
+
+fn attractor_to_within_border(
+    attractor: &mut attractors::Attractor,
     border: f64,
     width: usize,
     height: usize,
-) -> attractors::Attractor {
-    let attractor = attractors::Attractor::find_strange_attractor(rng, 1_000_000).unwrap();
+) {
     let points = attractor.get_points::<512>();
 
     // 4 KiB
     let affine = attractors::affine_from_pca(&points);
-    let attractor = attractor.transform_input(affine);
+    *attractor = attractor.transform_input(affine);
 
     let bounds = attractor.get_bounds(512);
     let dst = [
@@ -540,13 +569,13 @@ fn attractor_within_border(
     ];
     let affine = attractors::map_bounds_affine(dst, bounds);
 
-    attractor.transform_input(affine)
+    *attractor = attractor.transform_input(affine);
 }
 
 fn rebuild_renderer(
     event_loop_proxy: EventLoopProxy<UserEvent>,
     window: winit::window::Window,
-    tasks: &mut WinitExecutor,
+    tasks: &mut WinitExecutor<UserEvent>,
     cli: &Cli,
 ) {
     let multisampling = cli.multisampling;

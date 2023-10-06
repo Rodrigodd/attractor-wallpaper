@@ -42,7 +42,10 @@ impl SurfaceState {
     }
 
     pub fn size(&self) -> winit::dpi::PhysicalSize<u32> {
-        self.window.inner_size()
+        winit::dpi::PhysicalSize {
+            width: self.config.width,
+            height: self.config.height,
+        }
     }
 
     pub fn texture_format(&self) -> wgpu::TextureFormat {
@@ -261,9 +264,11 @@ impl WgpuState {
 pub struct AttractorRenderer {
     pub size: winit::dpi::PhysicalSize<u32>,
     multisampling: u8,
+    output_format: wgpu::TextureFormat,
     render_pipeline: RenderPipeline,
     compute_pipeline: wgpu::ComputePipeline,
     bind_group: BindGroup,
+    pipeline_layout: wgpu::PipelineLayout,
     aggregate_buffer: wgpu::Buffer,
     uniforms_buffer: wgpu::Buffer,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -278,18 +283,7 @@ impl AttractorRenderer {
         output_format: wgpu::TextureFormat,
         multisampling: u8,
     ) -> Result<Self, Box<dyn Error>> {
-        let aggregate_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: size.width as u64
-                * multisampling as u64
-                * size.height as u64
-                * multisampling as u64
-                * std::mem::size_of::<u32>() as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let aggregate_buffer = gen_aggreate_buffer(device, size, multisampling);
 
         let particles = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
@@ -303,7 +297,6 @@ impl AttractorRenderer {
         let uniforms = Uniforms {
             screen_width: size.width,
             screen_height: size.height,
-            color_scale: 1.0,
         };
 
         let uniforms_buffer = device.create_buffer_init(&BufferInitDescriptor {
@@ -395,15 +388,52 @@ impl AttractorRenderer {
         Ok(Self {
             size,
             multisampling,
+            output_format,
             render_pipeline,
             compute_pipeline,
             bind_group,
+            pipeline_layout,
             aggregate_buffer,
             uniforms_buffer,
             bind_group_layout,
             particles,
             attractor_buffer,
         })
+    }
+
+    pub fn recreate_aggregate_buffer(
+        &mut self,
+        device: &Device,
+        size: winit::dpi::PhysicalSize<u32>,
+        multisampling: u8,
+    ) {
+        if self.size == size && self.multisampling == multisampling {
+            return;
+        }
+
+        self.size = size;
+        self.aggregate_buffer = gen_aggreate_buffer(device, self.size, multisampling);
+
+        self.bind_group = create_bind_group(
+            device,
+            &self.bind_group_layout,
+            &self.uniforms_buffer,
+            &self.aggregate_buffer,
+            &self.particles,
+            &self.attractor_buffer,
+        );
+
+        if multisampling != self.multisampling {
+            self.multisampling = multisampling;
+
+            self.render_pipeline = create_render_pipeline(
+                device,
+                self.output_format,
+                &self.pipeline_layout,
+                self.multisampling,
+            )
+            .unwrap();
+        }
     }
 
     pub fn resize(&mut self, device: &Device, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -415,29 +445,7 @@ impl AttractorRenderer {
             return;
         }
 
-        self.size = new_size;
-
-        self.aggregate_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: self.size.width as u64
-                * self.multisampling as u64
-                * self.size.height as u64
-                * self.multisampling as u64
-                * std::mem::size_of::<u32>() as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        self.bind_group = create_bind_group(
-            device,
-            &self.bind_group_layout,
-            &self.uniforms_buffer,
-            &self.aggregate_buffer,
-            &self.particles,
-            &self.attractor_buffer,
-        );
+        self.recreate_aggregate_buffer(device, new_size, self.multisampling);
     }
 
     pub fn load_attractor(&mut self, queue: &Queue, attractor: &attractors::Attractor) {
@@ -477,22 +485,13 @@ impl AttractorRenderer {
         device: &Device,
         queue: &Queue,
         compute: bool,
-        color_scale: f32,
         view: &wgpu::TextureView,
     ) {
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("Render Encoder"),
         });
 
-        queue.write_buffer(
-            &self.uniforms_buffer,
-            0,
-            bytemuck::cast_slice(&[Uniforms {
-                screen_width: self.size.width,
-                screen_height: self.size.height,
-                color_scale,
-            }]),
-        );
+        self.set_uniforms(queue);
 
         if compute {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -535,6 +534,36 @@ impl AttractorRenderer {
 
         render_pass.draw(0..3, 0..1);
     }
+
+    pub fn set_uniforms(&mut self, queue: &Queue) {
+        queue.write_buffer(
+            &self.uniforms_buffer,
+            0,
+            bytemuck::cast_slice(&[Uniforms {
+                screen_width: self.size.width,
+                screen_height: self.size.height,
+            }]),
+        );
+    }
+}
+
+fn gen_aggreate_buffer(
+    device: &Device,
+    size: winit::dpi::PhysicalSize<u32>,
+    multisampling: u8,
+) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: size.width as u64
+            * multisampling as u64
+            * size.height as u64
+            * multisampling as u64
+            * std::mem::size_of::<u32>() as u64,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
 }
 
 fn create_bind_group(
@@ -578,7 +607,6 @@ fn create_bind_group(
 struct Uniforms {
     screen_width: u32,
     screen_height: u32,
-    color_scale: f32,
 }
 
 #[repr(C)]
@@ -760,8 +788,6 @@ fn create_render_pipeline(
         "//CONVOLUTION",
         &convolution_code(&kernel, multisampling, side),
     );
-
-    println!("{}", source);
 
     let shader = device.create_shader_module(ShaderModuleDescriptor {
         label: Some("Shader"),
