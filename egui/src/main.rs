@@ -1,6 +1,7 @@
 use std::time::Duration;
 
-use egui::{Grid, Response, TextEdit, Ui};
+use attractors::AntiAliasing;
+use egui::{ComboBox, Grid, Response, TextEdit, Ui};
 use egui_wgpu::wgpu;
 use egui_winit::winit::{
     event::{Event, WindowEvent},
@@ -84,6 +85,7 @@ fn main() {
     let mut multisampling = 1;
     let mut seed_text = seed.to_string();
     let mut multisampling_text = multisampling.to_string();
+    let mut anti_aliasing = attractors::AntiAliasing::None;
 
     event_loop.run(move |event, _, control_flow| {
         // control_flow is a reference to an enum which tells us how to run the event loop.
@@ -162,7 +164,7 @@ fn main() {
                     size.width as usize * multisampling as usize,
                     size.height as usize * multisampling as usize,
                     samples,
-                    attractors::AntiAliasing::None,
+                    anti_aliasing,
                     &mut bitmap,
                 );
                 total_samples += samples;
@@ -171,7 +173,7 @@ fn main() {
                     total_samples,
                     size,
                     multisampling,
-                    attractors::AntiAliasing::None,
+                    anti_aliasing,
                 );
                 render_state
                     .attractor_renderer
@@ -241,6 +243,34 @@ fn main() {
                                 }
 
                                 ui.end_row();
+
+                                ui.label("anti-aliasing: ");
+                                let prev_anti_aliasing = anti_aliasing;
+
+                                ComboBox::new("anti-aliasing", "")
+                                    .selected_text(format!("{:?}", anti_aliasing))
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(
+                                            &mut anti_aliasing,
+                                            AntiAliasing::None,
+                                            "None",
+                                        );
+                                        ui.selectable_value(
+                                            &mut anti_aliasing,
+                                            AntiAliasing::Bilinear,
+                                            "Bilinear",
+                                        );
+                                        ui.selectable_value(
+                                            &mut anti_aliasing,
+                                            AntiAliasing::Lanczos,
+                                            "Lanczos",
+                                        );
+                                    });
+
+                                if prev_anti_aliasing != anti_aliasing {
+                                    bitmap.fill(0);
+                                    total_samples = 0;
+                                }
                             });
                             // ui.allocate_space(ui.available_size());
                         });

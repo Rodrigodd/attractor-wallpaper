@@ -349,7 +349,7 @@ impl Num for i64 {
     const MAX: Self = Self::MAX;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AntiAliasing {
     None,
     Bilinear,
