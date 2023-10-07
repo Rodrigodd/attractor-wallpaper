@@ -53,6 +53,34 @@ struct RenderState {
     egui_renderer: egui_wgpu::Renderer,
 }
 
+struct GuiState {
+    seed: u64,
+    seed_text: String,
+    multisampling: u8,
+    multisampling_text: String,
+    anti_aliasing: AntiAliasing,
+}
+impl GuiState {
+    fn set_seed(&mut self, seed: u64) {
+        self.seed = seed;
+        self.seed_text = seed.to_string();
+    }
+
+    fn seed(&mut self) -> u64 {
+        if let Ok(seed) = self.seed_text.parse::<u64>() {
+            self.seed = seed;
+        }
+        self.seed
+    }
+
+    fn multisampling(&mut self) -> u8 {
+        if let Ok(multisampling) = self.multisampling_text.parse::<u8>() {
+            self.multisampling = multisampling;
+        }
+        self.multisampling
+    }
+}
+
 fn main() {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
 
@@ -77,15 +105,20 @@ fn main() {
 
     let mut render_state = None;
 
-    let multisampling = 1;
-    let (mut attractor, mut bitmap, mut total_samples, mut base_intensity) =
-        render::gen_attractor(size.width as usize, size.height as usize, 0, multisampling);
+    let mut gui_state = GuiState {
+        seed: 0,
+        seed_text: 0.to_string(),
+        multisampling: 1,
+        multisampling_text: 1.to_string(),
+        anti_aliasing: attractors::AntiAliasing::None,
+    };
 
-    let mut seed = 0;
-    let mut multisampling = 1;
-    let mut seed_text = seed.to_string();
-    let mut multisampling_text = multisampling.to_string();
-    let mut anti_aliasing = attractors::AntiAliasing::None;
+    let (mut attractor, mut bitmap, mut total_samples, mut base_intensity) = render::gen_attractor(
+        size.width as usize,
+        size.height as usize,
+        gui_state.seed(),
+        gui_state.multisampling(),
+    );
 
     event_loop.run(move |event, _, control_flow| {
         // control_flow is a reference to an enum which tells us how to run the event loop.
@@ -136,12 +169,12 @@ fn main() {
                     (bitmap, total_samples) = render::resize_attractor(
                         &mut attractor,
                         (
-                            old_size.width as usize * multisampling as usize,
-                            old_size.height as usize * multisampling as usize,
+                            old_size.width as usize * gui_state.multisampling as usize,
+                            old_size.height as usize * gui_state.multisampling as usize,
                         ),
                         (
-                            new_size.width as usize * multisampling as usize,
-                            new_size.height as usize * multisampling as usize,
+                            new_size.width as usize * gui_state.multisampling as usize,
+                            new_size.height as usize * gui_state.multisampling as usize,
                         ),
                     );
 
@@ -161,10 +194,10 @@ fn main() {
                 let size = render_state.surface.size();
                 attractors::aggregate_to_bitmap(
                     &mut attractor,
-                    size.width as usize * multisampling as usize,
-                    size.height as usize * multisampling as usize,
+                    size.width as usize * gui_state.multisampling as usize,
+                    size.height as usize * gui_state.multisampling as usize,
                     samples,
-                    anti_aliasing,
+                    gui_state.anti_aliasing,
                     &mut bitmap,
                 );
                 total_samples += samples;
@@ -172,8 +205,8 @@ fn main() {
                     base_intensity,
                     total_samples,
                     size,
-                    multisampling,
-                    anti_aliasing,
+                    gui_state.multisampling,
+                    gui_state.anti_aliasing,
                 );
                 render_state
                     .attractor_renderer
@@ -181,101 +214,24 @@ fn main() {
 
                 let new_input = egui_state.take_egui_input(window);
 
-                let mut full_output = egui_ctx.run(new_input, |ctx| {
+                let mut full_output = egui_ctx.run(new_input, |ui| {
                     egui::Window::new("Hello world!")
                         .resizable(false) // could not figure out how make this work
-                        .show(ctx, |ui| {
-                            Grid::new("options_grid").show(ui, |ui| {
-                                ui.label("seed: ");
-                                ui.horizontal(|ui| {
-                                    if ui.my_text_field(&mut seed_text).lost_focus() {
-                                        if let Ok(s) = seed_text.parse() {
-                                            seed = s;
-                                            (attractor, bitmap, total_samples, base_intensity) =
-                                                render::gen_attractor(
-                                                    size.width as usize,
-                                                    size.height as usize,
-                                                    seed,
-                                                    multisampling,
-                                                );
-                                        }
-                                        println!("new text: {}", seed_text);
-                                    }
-
-                                    if ui.button("rand").clicked() {
-                                        seed = rand::thread_rng().gen();
-                                        seed_text = seed.to_string();
-                                        (attractor, bitmap, total_samples, base_intensity) =
-                                            render::gen_attractor(
-                                                size.width as usize,
-                                                size.height as usize,
-                                                seed,
-                                                multisampling,
-                                            );
-                                    }
-                                });
-
-                                ui.end_row();
-
-                                ui.label("multisampling: ");
-                                if ui.my_text_field(&mut multisampling_text).lost_focus() {
-                                    println!("new text: {}", multisampling_text);
-                                    if let Ok(m) = multisampling_text.parse() {
-                                        render_state.attractor_renderer.recreate_aggregate_buffer(
-                                            &render_state.wgpu_state.device,
-                                            render_state.surface.size(),
-                                            m,
-                                        );
-                                        let size = render_state.surface.size();
-                                        (bitmap, total_samples) = render::resize_attractor(
-                                            &mut attractor,
-                                            (
-                                                size.width as usize * multisampling as usize,
-                                                size.height as usize * multisampling as usize,
-                                            ),
-                                            (
-                                                size.width as usize * m as usize,
-                                                size.height as usize * m as usize,
-                                            ),
-                                        );
-                                        multisampling = m;
-                                    }
-                                }
-
-                                ui.end_row();
-
-                                ui.label("anti-aliasing: ");
-                                let prev_anti_aliasing = anti_aliasing;
-
-                                ComboBox::new("anti-aliasing", "")
-                                    .selected_text(format!("{:?}", anti_aliasing))
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut anti_aliasing,
-                                            AntiAliasing::None,
-                                            "None",
-                                        );
-                                        ui.selectable_value(
-                                            &mut anti_aliasing,
-                                            AntiAliasing::Bilinear,
-                                            "Bilinear",
-                                        );
-                                        ui.selectable_value(
-                                            &mut anti_aliasing,
-                                            AntiAliasing::Lanczos,
-                                            "Lanczos",
-                                        );
-                                    });
-
-                                if prev_anti_aliasing != anti_aliasing {
-                                    bitmap.fill(0);
-                                    total_samples = 0;
-                                }
-                            });
+                        .show(ui, |ui| {
+                            build_ui(
+                                ui,
+                                &mut gui_state,
+                                &mut attractor,
+                                &mut bitmap,
+                                &mut total_samples,
+                                &mut base_intensity,
+                                render_state,
+                            );
                             // ui.allocate_space(ui.available_size());
                         });
                 });
 
+                let window = render_state.surface.window();
                 if full_output.repaint_after == Duration::ZERO {
                     window.request_redraw();
                 }
@@ -292,6 +248,94 @@ fn main() {
             _ => (),
         }
     });
+}
+
+fn build_ui(
+    ui: &mut Ui,
+    gui_state: &mut GuiState,
+    attractor: &mut attractors::Attractor,
+    bitmap: &mut Vec<i32>,
+    total_samples: &mut u64,
+    base_intensity: &mut i16,
+    render_state: &mut RenderState,
+) -> egui::InnerResponse<()> {
+    let size = render_state.surface.size();
+    Grid::new("options_grid").show(ui, |ui| {
+        ui.label("seed: ");
+        ui.horizontal(|ui| {
+            if ui.my_text_field(&mut gui_state.seed_text).lost_focus() {
+                (*attractor, *bitmap, *total_samples, *base_intensity) = render::gen_attractor(
+                    size.width as usize,
+                    size.height as usize,
+                    gui_state.seed(),
+                    gui_state.multisampling(),
+                );
+            }
+
+            if ui.button("rand").clicked() {
+                gui_state.set_seed(rand::thread_rng().gen());
+                (*attractor, *bitmap, *total_samples, *base_intensity) = render::gen_attractor(
+                    size.width as usize,
+                    size.height as usize,
+                    gui_state.seed(),
+                    gui_state.multisampling(),
+                );
+            }
+        });
+
+        ui.end_row();
+
+        ui.label("multisampling: ");
+        let prev_multisampling = gui_state.multisampling();
+        if ui
+            .my_text_field(&mut gui_state.multisampling_text)
+            .lost_focus()
+        {
+            println!("new text: {}", gui_state.multisampling_text);
+            render_state.attractor_renderer.recreate_aggregate_buffer(
+                &render_state.wgpu_state.device,
+                size,
+                gui_state.multisampling(),
+            );
+            (*bitmap, *total_samples) = render::resize_attractor(
+                attractor,
+                (
+                    size.width as usize * prev_multisampling as usize,
+                    size.height as usize * prev_multisampling as usize,
+                ),
+                (
+                    size.width as usize * gui_state.multisampling() as usize,
+                    size.height as usize * gui_state.multisampling() as usize,
+                ),
+            );
+        }
+
+        ui.end_row();
+
+        ui.label("anti-aliasing: ");
+        let prev_anti_aliasing = gui_state.anti_aliasing;
+
+        ComboBox::new("anti-aliasing", "")
+            .selected_text(format!("{:?}", gui_state.anti_aliasing))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut gui_state.anti_aliasing, AntiAliasing::None, "None");
+                ui.selectable_value(
+                    &mut gui_state.anti_aliasing,
+                    AntiAliasing::Bilinear,
+                    "Bilinear",
+                );
+                ui.selectable_value(
+                    &mut gui_state.anti_aliasing,
+                    AntiAliasing::Lanczos,
+                    "Lanczos",
+                );
+            });
+
+        if prev_anti_aliasing != gui_state.anti_aliasing {
+            bitmap.fill(0);
+            *total_samples = 0;
+        }
+    })
 }
 
 fn render_frame(
