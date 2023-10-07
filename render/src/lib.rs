@@ -503,12 +503,12 @@ pub fn gen_attractor(
     let rng = rand::rngs::SmallRng::seed_from_u64(seed);
     let mut attractor = attractors::Attractor::find_strange_attractor(rng, 1_000_000).unwrap();
 
-    let border = 15.0;
+    let border = 0.1;
     let multisampling = multisampling as usize;
 
     attractor_to_within_border(
         &mut attractor,
-        border * multisampling as f64,
+        border * multisampling as f64 * width.min(height) as f64,
         width * multisampling,
         height * multisampling,
     );
