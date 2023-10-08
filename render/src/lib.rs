@@ -524,21 +524,9 @@ pub fn resize_attractor(
     old_size: (usize, usize),
     new_size: (usize, usize),
 ) -> (Vec<i32>, u64) {
-    let border = 0.0;
-
     let affine = map_bounds_affine(
-        [
-            border,
-            new_size.0 as f64 - border,
-            border,
-            new_size.1 as f64 - border,
-        ],
-        [
-            border,
-            old_size.0 as f64 - border,
-            border,
-            old_size.1 as f64 - border,
-        ],
+        [0.0, new_size.0 as f64, 0.0, new_size.1 as f64],
+        [0.0, old_size.0 as f64, 0.0, old_size.1 as f64],
     );
 
     *attractor = attractor.transform_input(affine);
