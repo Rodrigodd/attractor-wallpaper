@@ -73,11 +73,20 @@ impl GuiState {
         self.seed
     }
 
+    fn update_seed(&mut self) {
+        if let Ok(seed) = self.seed_text.parse::<u64>() {
+            self.seed = seed;
+        }
+    }
+
     fn multisampling(&mut self) -> u8 {
+        self.multisampling
+    }
+
+    fn update_multisampling(&mut self) {
         if let Ok(multisampling) = self.multisampling_text.parse::<u8>() {
             self.multisampling = multisampling;
         }
-        self.multisampling
     }
 }
 
@@ -194,8 +203,8 @@ fn main() {
                 let size = render_state.surface.size();
                 attractors::aggregate_to_bitmap(
                     &mut attractor,
-                    size.width as usize * gui_state.multisampling as usize,
-                    size.height as usize * gui_state.multisampling as usize,
+                    size.width as usize * gui_state.multisampling() as usize,
+                    size.height as usize * gui_state.multisampling() as usize,
                     samples,
                     gui_state.anti_aliasing,
                     &mut bitmap,
@@ -264,6 +273,7 @@ fn build_ui(
         ui.label("seed: ");
         ui.horizontal(|ui| {
             if ui.my_text_field(&mut gui_state.seed_text).lost_focus() {
+                gui_state.update_seed();
                 (*attractor, *bitmap, *total_samples, *base_intensity) = render::gen_attractor(
                     size.width as usize,
                     size.height as usize,
@@ -273,6 +283,7 @@ fn build_ui(
             }
 
             if ui.button("rand").clicked() {
+                gui_state.update_seed();
                 gui_state.set_seed(rand::thread_rng().gen());
                 (*attractor, *bitmap, *total_samples, *base_intensity) = render::gen_attractor(
                     size.width as usize,
@@ -291,7 +302,7 @@ fn build_ui(
             .my_text_field(&mut gui_state.multisampling_text)
             .lost_focus()
         {
-            println!("new text: {}", gui_state.multisampling_text);
+            gui_state.update_multisampling();
             render_state.attractor_renderer.recreate_aggregate_buffer(
                 &render_state.wgpu_state.device,
                 size,
