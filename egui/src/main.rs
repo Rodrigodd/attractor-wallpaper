@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use attractors::AntiAliasing;
-use egui::{ComboBox, Grid, Response, TextEdit, Ui};
+use egui::{ComboBox, Grid, Response, Slider, TextEdit, Ui};
 use egui_wgpu::wgpu;
 use egui_winit::winit::{
     event::{Event, WindowEvent},
@@ -59,6 +59,7 @@ struct GuiState {
     multisampling: u8,
     multisampling_text: String,
     anti_aliasing: AntiAliasing,
+    intensity: f32,
 }
 impl GuiState {
     fn set_seed(&mut self, seed: u64) {
@@ -120,6 +121,7 @@ fn main() {
         multisampling: 1,
         multisampling_text: 1.to_string(),
         anti_aliasing: attractors::AntiAliasing::None,
+        intensity: 1.0,
     };
 
     let (mut attractor, mut bitmap, mut total_samples, mut base_intensity) = render::gen_attractor(
@@ -211,7 +213,7 @@ fn main() {
                 );
                 total_samples += samples;
                 bitmap[0] = render::get_intensity(
-                    base_intensity,
+                    (base_intensity as f32 / gui_state.intensity) as i16,
                     total_samples,
                     size,
                     gui_state.multisampling,
@@ -346,6 +348,11 @@ fn build_ui(
             bitmap.fill(0);
             *total_samples = 0;
         }
+
+        ui.end_row();
+
+        ui.label("intensity: ");
+        ui.add(Slider::new(&mut gui_state.intensity, 0.01..=2.0));
     })
 }
 
