@@ -13,6 +13,8 @@ use winit::{
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+const BORDER: f64 = 0.1;
+
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 enum RenderBackend {
     Cpu,
@@ -494,6 +496,13 @@ pub fn get_intensity(
         / multisampling as u64) as i32
 }
 
+fn square_bounds(width: f64, height: f64, border: f64) -> [f64; 4] {
+    let size = width.min(height) * (1.0 - 2.0 * border);
+    let start_x = (width - size) / 2.0;
+    let start_y = (height - size) / 2.0;
+    [start_x, start_x + size, start_y, start_y + size]
+}
+
 pub fn gen_attractor(
     width: usize,
     height: usize,
@@ -503,15 +512,26 @@ pub fn gen_attractor(
     let rng = rand::rngs::SmallRng::seed_from_u64(seed);
     let mut attractor = attractors::Attractor::find_strange_attractor(rng, 1_000_000).unwrap();
 
-    let border = 0.1;
     let multisampling = multisampling as usize;
 
-    attractor_to_within_border(
-        &mut attractor,
-        border * multisampling as f64 * width.min(height) as f64,
-        width * multisampling,
-        height * multisampling,
-    );
+    {
+        let points = attractor.get_points::<512>();
+
+        // 4 KiB
+        let affine = attractors::affine_from_pca(&points);
+        attractor = attractor.transform_input(affine);
+
+        let bounds = attractor.get_bounds(512);
+
+        let dst = square_bounds(
+            (width * multisampling) as f64,
+            (height * multisampling) as f64,
+            BORDER,
+        );
+        let affine = attractors::map_bounds_affine(dst, bounds);
+
+        attractor = attractor.transform_input(affine);
+    };
     let bitmap = vec![0i32; width * multisampling * height * multisampling];
 
     let base_intensity = attractors::get_base_intensity(&attractor);
@@ -524,40 +544,12 @@ pub fn resize_attractor(
     old_size: (usize, usize),
     new_size: (usize, usize),
 ) -> (Vec<i32>, u64) {
-    let affine = map_bounds_affine(
-        [0.0, new_size.0 as f64, 0.0, new_size.1 as f64],
-        [0.0, old_size.0 as f64, 0.0, old_size.1 as f64],
-    );
-
+    let src = square_bounds(old_size.0 as f64, old_size.1 as f64, BORDER);
+    let dst = square_bounds(new_size.0 as f64, new_size.1 as f64, BORDER);
+    let affine = map_bounds_affine(dst, src);
     *attractor = attractor.transform_input(affine);
-
     let bitmap = vec![0i32; new_size.0 * new_size.1];
-
     (bitmap, 0u64)
-}
-
-fn attractor_to_within_border(
-    attractor: &mut attractors::Attractor,
-    border: f64,
-    width: usize,
-    height: usize,
-) {
-    let points = attractor.get_points::<512>();
-
-    // 4 KiB
-    let affine = attractors::affine_from_pca(&points);
-    *attractor = attractor.transform_input(affine);
-
-    let bounds = attractor.get_bounds(512);
-    let dst = [
-        border,
-        width as f64 - border,
-        border,
-        height as f64 - border,
-    ];
-    let affine = attractors::map_bounds_affine(dst, bounds);
-
-    *attractor = attractor.transform_input(affine);
 }
 
 fn rebuild_renderer(
