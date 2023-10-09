@@ -4,7 +4,8 @@ use attractors::AntiAliasing;
 use egui::{ComboBox, Grid, Response, Slider, TextEdit, Ui};
 use egui_wgpu::wgpu;
 use egui_winit::winit::{
-    event::{Event, WindowEvent},
+    dpi::PhysicalPosition,
+    event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
     platform::wayland::WindowBuilderExtWayland,
     window::{Window, WindowBuilder},
@@ -60,6 +61,9 @@ struct GuiState {
     multisampling_text: String,
     anti_aliasing: AntiAliasing,
     intensity: f32,
+    dragging: bool,
+    rotating: bool,
+    last_cursor_position: PhysicalPosition<f64>,
 }
 impl GuiState {
     fn set_seed(&mut self, seed: u64) {
@@ -122,6 +126,9 @@ fn main() {
         multisampling_text: 1.to_string(),
         anti_aliasing: attractors::AntiAliasing::None,
         intensity: 1.0,
+        dragging: false,
+        rotating: false,
+        last_cursor_position: PhysicalPosition::default(),
     };
 
     let (mut attractor, mut bitmap, mut total_samples, mut base_intensity) = render::gen_attractor(
@@ -173,35 +180,115 @@ fn main() {
                     return;
                 }
 
-                if let WindowEvent::CloseRequested = event {
-                    *control_flow = ControlFlow::Exit
-                } else if let WindowEvent::Resized(new_size) = event {
-                    let old_size = render_state.surface.size();
-                    (bitmap, total_samples) = render::resize_attractor(
-                        &mut attractor,
-                        (
-                            old_size.width as usize * gui_state.multisampling as usize,
-                            old_size.height as usize * gui_state.multisampling as usize,
-                        ),
-                        (
-                            new_size.width as usize * gui_state.multisampling as usize,
-                            new_size.height as usize * gui_state.multisampling as usize,
-                        ),
-                    );
+                match event {
+                    WindowEvent::MouseInput {
+                        state,
+                        button: MouseButton::Left,
+                        ..
+                    } => match state {
+                        ElementState::Pressed => gui_state.dragging = true,
+                        ElementState::Released => gui_state.dragging = false,
+                    },
+                    WindowEvent::MouseInput {
+                        state,
+                        button: MouseButton::Right,
+                        ..
+                    } => match state {
+                        ElementState::Pressed => gui_state.rotating = true,
+                        ElementState::Released => gui_state.rotating = false,
+                    },
+                    WindowEvent::CursorLeft { .. } => {
+                        gui_state.dragging = false;
+                        gui_state.rotating = false;
+                    }
+                    WindowEvent::CursorMoved { position, .. } => {
+                        if gui_state.dragging {
+                            let delta_x = position.x - gui_state.last_cursor_position.x;
+                            let delta_y = position.y - gui_state.last_cursor_position.y;
 
-                    render_state
-                        .attractor_renderer
-                        .resize(&render_state.wgpu_state.device, new_size);
-                    render_state
-                        .surface
-                        .resize(new_size, &render_state.wgpu_state.device);
-                    render_state
-                        .attractor_renderer
-                        .load_attractor(&render_state.wgpu_state.queue, &attractor);
+                            let m = gui_state.multisampling() as f64;
+                            let mat = [1.0, 0.0, 0.0, 1.0];
+                            let trans = [-delta_x * m, -delta_y * m];
+
+                            attractor = attractor.transform_input((mat, trans));
+                            bitmap.fill(0);
+                            total_samples = 0;
+                        } else if gui_state.rotating {
+                            let size = render_state.surface.size();
+                            let cx = size.width as f64 / 2.0;
+                            let cy = size.height as f64 / 2.0;
+
+                            let ldx = gui_state.last_cursor_position.y - cy;
+                            let ldy = gui_state.last_cursor_position.x - cx;
+                            let last_a = f64::atan2(ldx, ldy);
+
+                            let dx = position.y - cy;
+                            let dy = position.x - cx;
+                            let a = f64::atan2(dx, dy);
+
+                            let delta_a: f64 = a - last_a;
+
+                            // Rot(x - c) + c => Rot(x) + (c - Rot(c))
+                            let mat = [delta_a.cos(), delta_a.sin(), -delta_a.sin(), delta_a.cos()];
+                            let trans = [
+                                cx - mat[0] * cx - mat[1] * cy,
+                                cy - mat[2] * cx - mat[3] * cy,
+                            ];
+
+                            attractor = attractor.transform_input((mat, trans));
+                            bitmap.fill(0);
+                            total_samples = 0;
+                        }
+                        gui_state.last_cursor_position = position;
+                    }
+                    WindowEvent::MouseWheel { delta, .. } => {
+                        let delta = match delta {
+                            MouseScrollDelta::LineDelta(_, y) => y as f64 * 12.0,
+                            MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => y,
+                        };
+
+                        let delta_s = (-delta * 0.02).exp2();
+
+                        // S(x - c) + c => S(x) + (c - S(c))
+                        let mat = [delta_s, 0.0, 0.0, delta_s];
+                        let trans = [
+                            gui_state.last_cursor_position.x * (1.0 - delta_s),
+                            gui_state.last_cursor_position.y * (1.0 - delta_s),
+                        ];
+                        attractor = attractor.transform_input((mat, trans));
+                        bitmap.fill(0);
+                        total_samples = 0;
+                    }
+                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                    WindowEvent::Resized(new_size) => {
+                        let old_size = render_state.surface.size();
+                        (bitmap, total_samples) = render::resize_attractor(
+                            &mut attractor,
+                            (
+                                old_size.width as usize * gui_state.multisampling as usize,
+                                old_size.height as usize * gui_state.multisampling as usize,
+                            ),
+                            (
+                                new_size.width as usize * gui_state.multisampling as usize,
+                                new_size.height as usize * gui_state.multisampling as usize,
+                            ),
+                        );
+
+                        render_state
+                            .attractor_renderer
+                            .resize(&render_state.wgpu_state.device, new_size);
+                        render_state
+                            .surface
+                            .resize(new_size, &render_state.wgpu_state.device);
+                        render_state
+                            .attractor_renderer
+                            .load_attractor(&render_state.wgpu_state.queue, &attractor);
+                    }
+                    _ => (),
                 }
             }
             Event::MainEventsCleared => {
-                let samples = 400_000;
+                let samples = 40_000;
                 let size = render_state.surface.size();
                 attractors::aggregate_to_bitmap(
                     &mut attractor,
