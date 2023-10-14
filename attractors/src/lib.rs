@@ -6,7 +6,7 @@ type Point = [f64; 2];
 /// (min_x, max_x, min_y, max_y)
 type Bounds = [f64; 4];
 /// Matrix and translation vector
-type Affine = ([f64; 4], [f64; 2]);
+pub type Affine = ([f64; 4], [f64; 2]);
 
 #[derive(Debug, Clone, Copy)]
 pub enum Behavior {
