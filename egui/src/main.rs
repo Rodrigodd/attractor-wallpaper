@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use attractors::AntiAliasing;
 use egui::{Checkbox, ComboBox, Grid, Response, Slider, TextEdit, Ui};
@@ -139,6 +139,7 @@ fn main() {
         gui_state.seed(),
         gui_state.multisampling(),
     );
+    let mut last_change = Instant::now();
 
     event_loop.run(move |event, _, control_flow| {
         // control_flow is a reference to an enum which tells us how to run the event loop.
@@ -215,6 +216,7 @@ fn main() {
                             attractor = attractor.transform_input((mat, trans));
                             bitmap.fill(0);
                             total_samples = 0;
+                            last_change = Instant::now();
                         } else if gui_state.rotating {
                             let size = render_state.surface.size();
                             let cx = size.width as f64 / 2.0;
@@ -240,6 +242,7 @@ fn main() {
                             attractor = attractor.transform_input((mat, trans));
                             bitmap.fill(0);
                             total_samples = 0;
+                            last_change = Instant::now();
                         }
                         gui_state.last_cursor_position = position;
                     }
@@ -260,6 +263,7 @@ fn main() {
                         attractor = attractor.transform_input((mat, trans));
                         bitmap.fill(0);
                         total_samples = 0;
+                        last_change = Instant::now();
                     }
                     WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                     WindowEvent::Resized(new_size) => {
@@ -275,6 +279,7 @@ fn main() {
                                 new_size.height as usize * gui_state.multisampling as usize,
                             ),
                         );
+                        last_change = Instant::now();
 
                         render_state
                             .attractor_renderer
@@ -330,6 +335,7 @@ fn main() {
                                 &mut bitmap,
                                 &mut total_samples,
                                 &mut base_intensity,
+                                &mut last_change,
                                 render_state,
                             );
                             // ui.allocate_space(ui.available_size());
@@ -355,6 +361,7 @@ fn main() {
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_ui(
     ui: &mut Ui,
     gui_state: &mut GuiState,
@@ -362,10 +369,17 @@ fn build_ui(
     bitmap: &mut Vec<i32>,
     total_samples: &mut u64,
     base_intensity: &mut i16,
+    last_change: &mut Instant,
     render_state: &mut RenderState,
 ) -> egui::InnerResponse<()> {
     let size = render_state.surface.size();
     Grid::new("options_grid").show(ui, |ui| {
+        ui.label(format!(
+            "sample per second: {:.2e}",
+            *total_samples as f64 / last_change.elapsed().as_secs_f64()
+        ));
+        ui.end_row();
+
         ui.label("seed: ");
         ui.horizontal(|ui| {
             if ui.my_text_field(&mut gui_state.seed_text).lost_focus() {
@@ -376,6 +390,7 @@ fn build_ui(
                     gui_state.seed(),
                     gui_state.multisampling(),
                 );
+                *last_change = Instant::now();
             }
 
             if ui.button("rand").clicked() {
@@ -387,6 +402,7 @@ fn build_ui(
                     gui_state.seed(),
                     gui_state.multisampling(),
                 );
+                *last_change = Instant::now();
             }
         });
 
@@ -415,6 +431,7 @@ fn build_ui(
                     size.height as usize * gui_state.multisampling() as usize,
                 ),
             );
+            *last_change = Instant::now();
         }
 
         ui.end_row();
@@ -441,12 +458,14 @@ fn build_ui(
         if prev_anti_aliasing != gui_state.anti_aliasing {
             bitmap.fill(0);
             *total_samples = 0;
+            *last_change = Instant::now();
         }
 
         ui.end_row();
 
         ui.label("intensity: ");
         ui.add(Slider::new(&mut gui_state.intensity, 0.01..=2.0));
+
         ui.end_row();
 
         ui.label("random start: ");
