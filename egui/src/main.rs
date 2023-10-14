@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use attractors::AntiAliasing;
-use egui::{ComboBox, Grid, Response, Slider, TextEdit, Ui};
+use egui::{Checkbox, ComboBox, Grid, Response, Slider, TextEdit, Ui};
 use egui_wgpu::wgpu;
 use egui_winit::winit::{
     dpi::PhysicalPosition,
@@ -64,6 +64,7 @@ struct GuiState {
     dragging: bool,
     rotating: bool,
     last_cursor_position: PhysicalPosition<f64>,
+    random_start: bool,
 }
 impl GuiState {
     fn set_seed(&mut self, seed: u64) {
@@ -129,6 +130,7 @@ fn main() {
         dragging: false,
         rotating: false,
         last_cursor_position: PhysicalPosition::default(),
+        random_start: false,
     };
 
     let (mut attractor, mut bitmap, mut total_samples, mut base_intensity) = render::gen_attractor(
@@ -290,6 +292,11 @@ fn main() {
             Event::MainEventsCleared => {
                 let samples = 40_000;
                 let size = render_state.surface.size();
+
+                if gui_state.random_start {
+                    attractor.start = attractor.get_random_start_point(&mut rand::thread_rng());
+                }
+
                 attractors::aggregate_to_bitmap(
                     &mut attractor,
                     size.width as usize * gui_state.multisampling() as usize,
@@ -440,6 +447,17 @@ fn build_ui(
 
         ui.label("intensity: ");
         ui.add(Slider::new(&mut gui_state.intensity, 0.01..=2.0));
+        ui.end_row();
+
+        ui.label("random start: ");
+        if ui
+            .add(Checkbox::new(&mut gui_state.random_start, ""))
+            .changed()
+        {
+            bitmap.fill(0);
+            *total_samples = 0;
+            *last_change = Instant::now();
+        }
     })
 }
 

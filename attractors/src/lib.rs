@@ -120,9 +120,12 @@ impl Attractor {
                 fixed = p1;
             }
             // check if is periodic
-            if i > WAIT && too_close((fixed, p1)) {
-                // println!("periodic after {} steps", i - WAIT);
-                // return Behavior::Convergent { after: i, to: p1 };
+            if i > WAIT && fixed == p1 {
+                println!("period after {} steps", i - WAIT);
+                return Behavior::Periodic {
+                    lyapunov: 0.0,
+                    to: fixed,
+                };
             }
 
             // calculate lyapunov exponent
@@ -196,6 +199,24 @@ impl Attractor {
             p = self.step(p);
             p
         })
+    }
+
+    pub fn get_random_start_point(&self, rng: &mut impl Rng) -> [f64; 2] {
+        loop {
+            const RADIUS: f64 = 0.001;
+            let dx = rng.gen_range(-1.0..1.0) * RADIUS;
+            let dy = rng.gen_range(-1.0..1.0) * RADIUS;
+
+            let px = self.start[0] + dx;
+            let py = self.start[1] + dy;
+
+            let mut attractor = *self;
+            attractor.start = [px, py];
+            match attractor.check_behavior() {
+                Behavior::Chaotic { to, .. } => return to,
+                _ => continue,
+            }
+        }
     }
 }
 
