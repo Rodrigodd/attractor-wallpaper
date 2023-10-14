@@ -787,6 +787,55 @@ mod test {
     }
 
     #[test]
+    #[ignore]
+    fn check_period_length() {
+        let rng = rand::rngs::SmallRng::from_entropy();
+        let attractor = Attractor::find_strange_attractor(rng, 1000).unwrap();
+
+        let affine = super::affine_from_pca(&attractor.get_points::<512>());
+        let attractor = attractor.transform_input(affine);
+
+        // after the tranformation, the attractor should be in the range [-1, 1]. We are using a
+        // f64, so we can assume that there are a maximu of 2^63 valid points, in each axis, or
+        // 2^126 in total. This means that the maximum period length is 2^126.
+        //
+        // If we consider that the step function is a completely random function, the expected period
+        // length should be around (n+1) / 2 ~= 2^125.
+        // https://en.wikipedia.org/wiki/Random_permutation_statistics#Expected_cycle_size_of_a_random_element
+        //
+        // If we consider that only a small subset of the points are valid, like 1/1000, the mean
+        // period length should be around 2^116. If we consider that some region of space is about
+        // 1,000,000,000 times more dense than the average, the mean period length should be around
+        // 2^96.
+        //
+        // From this analisis, I conclude that I maybe should not worry that the function will
+        // cycle before the attractor render converges to a clear image. And that the test below
+        // will likely not find a period.
+
+        let mut p = attractor.start;
+        for k in 0..32 {
+            let mut i = 0u64;
+            let start = p;
+            let length = 1 << k;
+            println!("length: {}", length);
+            if p[0] * p[0] + p[1] * p[1] > 1000.0 {
+                println!("diverged!, p: {:?}", p);
+                panic!("diverged!");
+            }
+            while i < length {
+                p = attractor.step(p);
+                i += 1;
+                if p == start {
+                    println!("period length: {}", i);
+                    panic!();
+                }
+            }
+        }
+
+        panic!();
+    }
+
+    #[test]
     fn test_map_bounds_affine() {
         let src = [0.0, 1.0, 0.0, 1.0];
         let dst = [0.0, 1.0, 0.0, 1.0];
