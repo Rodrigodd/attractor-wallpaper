@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    sync::mpsc::Sender,
+    time::{Duration, Instant},
+};
 
 use attractors::{Affine, AntiAliasing, Attractor};
 use egui::{Checkbox, ComboBox, Grid, Response, Slider, TextEdit, Ui};
@@ -15,6 +18,18 @@ use rand::prelude::*;
 use render::{AttractorRenderer, SurfaceState, TaskId, WgpuState, WinitExecutor};
 
 const BORDER: f64 = 0.1;
+
+mod channel;
+
+enum AttractorMess {
+    SetSeed(u64),
+    SetMultisampling(u8),
+    SetAntialiasing(AntiAliasing),
+    SetIntensity(f32),
+    SetRandomStart(bool),
+    Resize(PhysicalSize<u32>),
+    Transform(Affine),
+}
 
 async fn build_renderer(window: Window, proxy: EventLoopProxy<UserEvent>) {
     let (wgpu_state, surface) = render::WgpuState::new_windowed(window).await.unwrap();
@@ -56,6 +71,7 @@ struct RenderState {
     egui_renderer: egui_wgpu::Renderer,
 }
 
+#[derive(Clone)]
 struct AttractorCtx {
     attractor: Attractor,
     seed: u64,
@@ -68,6 +84,7 @@ struct AttractorCtx {
     anti_aliasing: AntiAliasing,
     random_start: bool,
     last_change: Instant,
+    // pub send_mess: Option<Sender<AttractorMess>>,
 }
 impl AttractorCtx {
     fn new(gui_state: &mut GuiState, size: PhysicalSize<u32>) -> Self {
@@ -114,6 +131,7 @@ impl AttractorCtx {
             anti_aliasing: gui_state.anti_aliasing,
             random_start: gui_state.random_start,
             last_change: Instant::now(),
+            // send_mess: None,
         }
     }
 
@@ -123,7 +141,9 @@ impl AttractorCtx {
         self.last_change = Instant::now();
     }
 
-    fn transform(&mut self, affine: Affine) {
+    fn transform(&mut self, mut affine: Affine) {
+        affine.1[0] *= self.multisampling as f64;
+        affine.1[1] *= self.multisampling as f64;
         self.attractor = self.attractor.transform_input(affine);
         self.clear();
     }
@@ -182,6 +202,10 @@ impl AttractorCtx {
     fn set_antialiasing(&mut self, anti_aliasing: AntiAliasing) {
         self.anti_aliasing = anti_aliasing;
         self.clear();
+    }
+
+    fn set_intensity(&mut self, intensity: f32) {
+        self.intensity = intensity;
     }
 
     fn set_random_start(&mut self, random_start: bool) {
@@ -244,9 +268,10 @@ fn main() {
     executor.spawn(task);
 
     let mut render_state = None;
+    let mut last_change = Instant::now();
 
     let mut gui_state = GuiState {
-        seed_text: 0.to_string(),
+        seed_text: 8742.to_string(),
         multisampling_text: 1.to_string(),
         anti_aliasing: attractors::AntiAliasing::None,
         intensity: 1.0,
@@ -256,7 +281,43 @@ fn main() {
         random_start: false,
     };
 
+    // let mut attractor = AttractorCtx::new(&mut gui_state, size);
+
+    let (attractor_sender, recv_conf) = std::sync::mpsc::channel::<AttractorMess>();
+    let (mut sender_bitmap, mut recv_bitmap) = channel::channel::<AttractorCtx>();
     let mut attractor = AttractorCtx::new(&mut gui_state, size);
+    std::thread::spawn(move || loop {
+        loop {
+            match recv_conf.try_recv() {
+                Ok(mess) => match mess {
+                    AttractorMess::SetSeed(seed) => attractor.set_seed(seed),
+                    AttractorMess::SetMultisampling(multisampling) => {
+                        attractor.set_multisampling(multisampling)
+                    }
+                    AttractorMess::SetAntialiasing(antialising) => {
+                        attractor.set_antialiasing(antialising)
+                    }
+                    AttractorMess::SetIntensity(intensity) => attractor.set_intensity(intensity),
+                    AttractorMess::SetRandomStart(random_start) => {
+                        attractor.set_random_start(random_start)
+                    }
+                    AttractorMess::Resize(size) => attractor.resize(size, attractor.multisampling),
+                    AttractorMess::Transform(affine) => attractor.transform(affine),
+                },
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+                _ => break,
+            }
+        }
+
+        aggregate_attractor(&mut attractor);
+
+        if sender_bitmap.is_closed() {
+            break;
+        }
+        sender_bitmap.send(&mut attractor);
+    });
+
+    // attractor.send_mess = Some(sender_conf);
 
     event_loop.run(move |event, _, control_flow| {
         // control_flow is a reference to an enum which tells us how to run the event loop.
@@ -271,8 +332,6 @@ fn main() {
                 attractor_renderer,
                 egui_renderer,
             ))) => {
-                println!("render state builded");
-                dbg!(&surface.size());
                 render_state = Some(RenderState {
                     wgpu_state,
                     surface,
@@ -326,11 +385,10 @@ fn main() {
                             let delta_x = position.x - gui_state.last_cursor_position.x;
                             let delta_y = position.y - gui_state.last_cursor_position.y;
 
-                            let m = attractor.multisampling as f64;
                             let mat = [1.0, 0.0, 0.0, 1.0];
-                            let trans = [-delta_x * m, -delta_y * m];
+                            let trans = [-delta_x, -delta_y];
 
-                            attractor.transform((mat, trans));
+                            let _ = attractor_sender.send(AttractorMess::Transform((mat, trans)));
                         } else if gui_state.rotating {
                             let size = render_state.surface.size();
                             let cx = size.width as f64 / 2.0;
@@ -353,7 +411,7 @@ fn main() {
                                 cy - mat[2] * cx - mat[3] * cy,
                             ];
 
-                            attractor.transform((mat, trans));
+                            let _ = attractor_sender.send(AttractorMess::Transform((mat, trans)));
                         }
                         gui_state.last_cursor_position = position;
                     }
@@ -371,11 +429,11 @@ fn main() {
                             gui_state.last_cursor_position.x * (1.0 - delta_s),
                             gui_state.last_cursor_position.y * (1.0 - delta_s),
                         ];
-                        attractor.transform((mat, trans));
+                        let _ = attractor_sender.send(AttractorMess::Transform((mat, trans)));
                     }
                     WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                     WindowEvent::Resized(new_size) => {
-                        attractor.resize(new_size, attractor.multisampling);
+                        let _ = attractor_sender.send(AttractorMess::Resize(new_size));
 
                         render_state
                             .attractor_renderer
@@ -383,42 +441,33 @@ fn main() {
                         render_state
                             .surface
                             .resize(new_size, &render_state.wgpu_state.device);
-                        render_state
-                            .attractor_renderer
-                            .load_attractor(&render_state.wgpu_state.queue, &attractor.attractor);
                     }
                     _ => (),
                 }
             }
             Event::MainEventsCleared => {
-                let samples = 40_000;
-                let size = render_state.surface.size();
+                let mut total_sampĺes = 0;
+                recv_bitmap.recv(|at| {
+                    if at.last_change > last_change {
+                        render_state
+                            .attractor_renderer
+                            .load_attractor(&render_state.wgpu_state.queue, &at.attractor);
+                    }
 
-                if attractor.random_start {
-                    attractor.attractor.start = attractor
-                        .attractor
-                        .get_random_start_point(&mut rand::thread_rng());
-                }
+                    at.bitmap[0] = render::get_intensity(
+                        (at.base_intensity as f32 / at.intensity) as i16,
+                        at.total_samples,
+                        at.size,
+                        at.multisampling,
+                        at.anti_aliasing,
+                    );
+                    render_state
+                        .attractor_renderer
+                        .load_aggragate_buffer(&render_state.wgpu_state.queue, &at.bitmap);
 
-                attractors::aggregate_to_bitmap(
-                    &mut attractor.attractor,
-                    size.width as usize * attractor.multisampling as usize,
-                    size.height as usize * attractor.multisampling as usize,
-                    samples,
-                    attractor.anti_aliasing,
-                    &mut attractor.bitmap,
-                );
-                attractor.total_samples += samples;
-                attractor.bitmap[0] = render::get_intensity(
-                    (attractor.base_intensity as f32 / attractor.intensity) as i16,
-                    attractor.total_samples,
-                    size,
-                    attractor.multisampling,
-                    attractor.anti_aliasing,
-                );
-                render_state
-                    .attractor_renderer
-                    .load_aggragate_buffer(&render_state.wgpu_state.queue, &attractor.bitmap);
+                    total_sampĺes = at.total_samples;
+                    last_change = at.last_change;
+                });
 
                 let new_input = egui_state.take_egui_input(window);
 
@@ -426,7 +475,14 @@ fn main() {
                     egui::Window::new("Hello world!")
                         .resizable(false) // could not figure out how make this work
                         .show(ui, |ui| {
-                            build_ui(ui, &mut gui_state, &mut attractor, render_state);
+                            build_ui(
+                                ui,
+                                &mut gui_state,
+                                &attractor_sender,
+                                total_sampĺes,
+                                last_change,
+                                render_state,
+                            );
                             // ui.allocate_space(ui.available_size());
                         });
                 });
@@ -450,17 +506,39 @@ fn main() {
     });
 }
 
+fn aggregate_attractor(attractor: &mut AttractorCtx) {
+    let samples = 4096;
+
+    if attractor.random_start {
+        attractor.attractor.start = attractor
+            .attractor
+            .get_random_start_point(&mut rand::thread_rng());
+    }
+
+    attractors::aggregate_to_bitmap(
+        &mut attractor.attractor,
+        attractor.size.width as usize * attractor.multisampling as usize,
+        attractor.size.height as usize * attractor.multisampling as usize,
+        samples,
+        attractor.anti_aliasing,
+        &mut attractor.bitmap,
+    );
+    attractor.total_samples += samples;
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_ui(
     ui: &mut Ui,
     gui_state: &mut GuiState,
-    attractor: &mut AttractorCtx,
+    attractor_sender: &Sender<AttractorMess>,
+    total_samples: u64,
+    last_change: Instant,
     render_state: &mut RenderState,
 ) -> egui::InnerResponse<()> {
     Grid::new("options_grid").show(ui, |ui| {
         ui.label(format!(
             "sample per second: {:.2e}",
-            attractor.total_samples as f64 / attractor.last_change.elapsed().as_secs_f64()
+            total_samples as f64 / last_change.elapsed().as_secs_f64()
         ));
         ui.end_row();
 
@@ -468,14 +546,14 @@ fn build_ui(
         ui.horizontal(|ui| {
             if ui.my_text_field(&mut gui_state.seed_text).lost_focus() {
                 if let Some(seed) = gui_state.seed() {
-                    attractor.set_seed(seed);
+                    let _ = attractor_sender.send(AttractorMess::SetSeed(seed));
                 }
             }
 
             if ui.button("rand").clicked() {
                 gui_state.set_seed(rand::thread_rng().gen());
                 if let Some(seed) = gui_state.seed() {
-                    attractor.set_seed(seed);
+                    let _ = attractor_sender.send(AttractorMess::SetSeed(seed));
                 }
             }
         });
@@ -488,10 +566,10 @@ fn build_ui(
             .lost_focus()
         {
             if let Some(multisampling) = gui_state.multisampling() {
-                attractor.set_multisampling(multisampling);
+                let _ = attractor_sender.send(AttractorMess::SetMultisampling(multisampling));
                 render_state.attractor_renderer.recreate_aggregate_buffer(
                     &render_state.wgpu_state.device,
-                    attractor.size,
+                    render_state.attractor_renderer.size,
                     multisampling,
                 );
             }
@@ -519,14 +597,14 @@ fn build_ui(
             });
 
         if prev_anti_aliasing != gui_state.anti_aliasing {
-            attractor.set_antialiasing(gui_state.anti_aliasing);
+            let _ = attractor_sender.send(AttractorMess::SetAntialiasing(gui_state.anti_aliasing));
         }
 
         ui.end_row();
 
         ui.label("intensity: ");
         ui.add(Slider::new(&mut gui_state.intensity, 0.01..=2.0));
-        attractor.intensity = gui_state.intensity;
+        let _ = attractor_sender.send(AttractorMess::SetIntensity(gui_state.intensity));
 
         ui.end_row();
 
@@ -535,7 +613,7 @@ fn build_ui(
             .add(Checkbox::new(&mut gui_state.random_start, ""))
             .changed()
         {
-            attractor.set_random_start(gui_state.random_start);
+            let _ = attractor_sender.send(AttractorMess::SetRandomStart(gui_state.random_start));
         }
     })
 }
