@@ -521,7 +521,8 @@ fn aggregate_attractor(attractor: &mut AttractorCtx) {
         attractor.size.height as usize * attractor.multisampling as usize,
         samples,
         attractor.anti_aliasing,
-        &mut attractor.bitmap,
+        &mut attractor.bitmap[..],
+        &mut 0,
     );
     attractor.total_samples += samples;
 }

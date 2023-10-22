@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicI32, Ordering};
+
 use rand::prelude::*;
 
 mod sympy;
@@ -335,39 +337,41 @@ pub fn affine_from_pca(points: &[Point]) -> Affine {
     (mat, t)
 }
 
-pub trait Num:
-    std::ops::Add
-    + From<i8>
-    + std::ops::AddAssign
-    + Eq
-    + Ord
-    + Copy
-    + std::fmt::Display
-    + std::marker::Sized
-{
-    const ZERO: Self;
-    const ONE: Self;
-    const MAX: Self;
+#[allow(clippy::len_without_is_empty)]
+pub trait Buffer {
+    type Element;
+
+    fn len(&self) -> usize;
+
+    fn aggregate(&mut self, i: usize, v: i8, max: &mut Self::Element);
 }
-impl Num for i8 {
-    const ZERO: Self = 0;
-    const ONE: Self = 1;
-    const MAX: Self = Self::MAX;
+
+impl<P: From<i8> + std::ops::AddAssign + Ord + Clone> Buffer for [P] {
+    type Element = P;
+
+    fn len(&self) -> usize {
+        <[P]>::len(self)
+    }
+
+    fn aggregate(&mut self, i: usize, v: i8, max: &mut Self::Element) {
+        self[i] += v.into();
+        let p = self[i].clone();
+        if p > *max {
+            *max = p;
+        }
+    }
 }
-impl Num for i16 {
-    const ZERO: Self = 0;
-    const ONE: Self = 1;
-    const MAX: Self = Self::MAX;
-}
-impl Num for i32 {
-    const ZERO: Self = 0;
-    const ONE: Self = 1;
-    const MAX: Self = Self::MAX;
-}
-impl Num for i64 {
-    const ZERO: Self = 0;
-    const ONE: Self = 1;
-    const MAX: Self = Self::MAX;
+impl Buffer for &[AtomicI32] {
+    type Element = AtomicI32;
+
+    fn len(&self) -> usize {
+        (*self).len()
+    }
+
+    fn aggregate(&mut self, i: usize, v: i8, max: &mut Self::Element) {
+        let v = self[i].fetch_add(v as i32, Ordering::Relaxed) + v as i32;
+        max.fetch_max(v, Ordering::Relaxed);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -378,30 +382,28 @@ pub enum AntiAliasing {
 }
 
 /// Renders the attractor to a 8-bit grayscale bitmap.
-pub fn aggregate_to_bitmap<P: Num>(
+pub fn aggregate_to_bitmap<B: Buffer + ?Sized>(
     attractor: &mut Attractor,
     width: usize,
     height: usize,
     samples: u64,
     anti_aliasing: AntiAliasing,
-    buffer: &mut [P],
-) -> P {
+    buffer: &mut B,
+    max: &mut B::Element,
+) {
     assert_eq!(buffer.len(), width * height);
 
     let mut p = attractor.start;
-    let mut max = P::ZERO;
     for _ in 0..samples {
         p = attractor.step(p);
         match anti_aliasing {
-            AntiAliasing::None => draw_point(p, width, height, buffer, &mut max),
-            AntiAliasing::Bilinear => draw_point_bilinear(p, width, height, buffer, &mut max),
-            AntiAliasing::Lanczos => draw_point_lanczos::<3, P>(p, width, height, buffer, &mut max),
+            AntiAliasing::None => draw_point(p, width, height, buffer, max),
+            AntiAliasing::Bilinear => draw_point_bilinear(p, width, height, buffer, max),
+            AntiAliasing::Lanczos => draw_point_lanczos::<3, _>(p, width, height, buffer, max),
         }
     }
 
     attractor.start = p;
-
-    max
 }
 
 pub fn generate_thumbnail(attractor: &Attractor) -> [i16; 256 * 256] {
@@ -422,7 +424,7 @@ pub fn generate_thumbnail(attractor: &Attractor) -> [i16; 256 * 256] {
     for _ in 0..samples {
         p = attractor.step(p);
         let pos = map_bounds(p, bounds, [0.0, WIDTH as f64, 0.0, HEIGHT as f64]);
-        draw_point(pos, WIDTH, HEIGHT, &mut buffer, &mut max);
+        draw_point(pos, WIDTH, HEIGHT, &mut buffer[..], &mut max);
     }
 
     attractor.start = p;
@@ -492,33 +494,29 @@ pub fn get_base_intensity(attractor: &Attractor) -> i16 {
     m
 }
 
-fn draw_point<P: Num>(p: [f64; 2], width: usize, height: usize, buffer: &mut [P], max: &mut P) {
+fn draw_point<B: Buffer + ?Sized>(
+    p: [f64; 2],
+    width: usize,
+    height: usize,
+    buffer: &mut B,
+    max: &mut B::Element,
+) {
     let x = p[0] as usize;
     let y = p[1] as usize;
 
     if x < width && y < height {
-        let p = &mut buffer[y * width + x];
-        if *p == P::ZERO {
-            *p += P::ONE;
-        }
-        if *p == P::MAX {
-            return;
-        }
-        *p += P::ONE;
-        if *p > *max {
-            *max = *p;
-        }
+        buffer.aggregate(y * width + x, 1, max);
     } else {
         // println!("out! {:?}", p);
     }
 }
 
-fn draw_point_bilinear<P: Num>(
+fn draw_point_bilinear<B: Buffer + ?Sized>(
     p: [f64; 2],
     width: usize,
     height: usize,
-    buffer: &mut [P],
-    max: &mut P,
+    buffer: &mut B,
+    max: &mut B::Element,
 ) {
     // anti-aliasing with bilinear interpolation
     let x0 = p[0].floor() as usize;
@@ -534,20 +532,9 @@ fn draw_point_bilinear<P: Num>(
     let c2 = (1.0 - fx) * fy;
     let c3 = fx * fy;
 
-    let mut add = |buffer: &mut [P], x, y, c: i8| {
-        let c: P = c.into();
+    let mut add = |buffer: &mut B, x, y, c: i8| {
         if x < width && y < height {
-            let p = &mut buffer[y * width + x];
-            if *p == P::ZERO {
-                *p += c;
-            }
-            if *p == P::MAX {
-                return;
-            }
-            *p += c;
-            if *p > *max {
-                *max = *p;
-            }
+            buffer.aggregate(y * width + x, c, max);
         }
     };
 
@@ -558,12 +545,12 @@ fn draw_point_bilinear<P: Num>(
 }
 
 /// Draw a anti-aliased point using 2x2 Lanczos kernel.
-fn draw_point_lanczos<const W: usize, P: Num>(
+fn draw_point_lanczos<const W: usize, B: Buffer + ?Sized>(
     p: [f64; 2],
     width: usize,
     height: usize,
-    buffer: &mut [P],
-    max: &mut P,
+    buffer: &mut B,
+    max: &mut B::Element,
 ) {
     // anti-aliasing with bilinear interpolation
     let x: [usize; W] = std::array::from_fn(|i| (p[0] - W as f64 / 2.0 + i as f64) as usize);
@@ -582,31 +569,21 @@ fn draw_point_lanczos<const W: usize, P: Num>(
         }
     };
 
-    let mut add = |buffer: &mut [P], x, y, c: i8| {
-        let c: P = c.into();
-        if x < width && y < height {
-            let p = &mut buffer[y * width + x];
-            if *p == P::ZERO {
-                *p += c;
-            }
-            if *p == P::MAX {
-                return;
-            }
-            *p += c;
-            if *p > *max {
-                *max = *p;
-            }
-        }
-    };
-
     for y in y {
+        if y >= height {
+            break;
+        }
         for x in x {
+            if x >= width {
+                continue;
+            }
+
             let dx = (x as f64 - p[0]).abs();
             let dy = (y as f64 - p[1]).abs();
 
             let c = l(dx) * l(dy);
 
-            add(buffer, x, y, (c * 64.0) as i8);
+            buffer.aggregate(y * width + x, (c * 64.0) as i8, max);
         }
     }
 }

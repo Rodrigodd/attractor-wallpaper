@@ -160,13 +160,15 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
     let start = std::time::Instant::now();
 
     let total_samples = 400_000_000;
-    let max = attractors::aggregate_to_bitmap(
+    let mut max = 0;
+    attractors::aggregate_to_bitmap(
         &mut attractor,
         size.width as usize * cli.multisampling as usize,
         size.height as usize * cli.multisampling as usize,
         total_samples,
         cli.anti_aliasing.into_attractors_antialiasing(),
-        &mut bitmap,
+        &mut bitmap[..],
+        &mut max,
     );
 
     println!(
@@ -418,13 +420,15 @@ pub async fn run_windowed(cli: Cli) {
                 if let RenderBackend::Cpu = cli.backend {
                     let samples = 400_000;
                     let size = state.window().inner_size();
-                    let max = attractors::aggregate_to_bitmap(
+                    let mut max = 0;
+                    attractors::aggregate_to_bitmap(
                         &mut attractor,
                         size.width as usize * cli.multisampling as usize,
                         size.height as usize * cli.multisampling as usize,
                         samples,
                         cli.anti_aliasing.into_attractors_antialiasing(),
-                        &mut bitmap,
+                        &mut bitmap[..],
+                        &mut max,
                     );
                     if max == i32::MAX {
                         println!("max reached");
