@@ -18,6 +18,7 @@ use rand::prelude::*;
 use render::{AttractorRenderer, SurfaceState, TaskId, WgpuState, WinitExecutor};
 
 const BORDER: f64 = 0.1;
+const SAMPLES_PER_ITERATION: u64 = 1_000_000;
 
 mod channel;
 
@@ -27,7 +28,8 @@ enum AttractorMess {
     SetAntialiasing(AntiAliasing),
     SetIntensity(f32),
     SetRandomStart(bool),
-    SetMultithreaded(bool),
+    SetMultithreaded(Multithreading),
+    SetSamplesPerIteration(u64),
     Resize(PhysicalSize<u32>),
     Transform(Affine),
 }
@@ -72,6 +74,13 @@ struct RenderState {
     egui_renderer: egui_wgpu::Renderer,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Multithreading {
+    Single,
+    AtomicMulti,
+    MergeMulti,
+}
+
 #[derive(Clone)]
 struct AttractorCtx {
     attractor: Attractor,
@@ -85,7 +94,8 @@ struct AttractorCtx {
     anti_aliasing: AntiAliasing,
     random_start: bool,
     last_change: Instant,
-    multithreaded: bool,
+    multithreaded: Multithreading,
+    samples_per_iteration: u64,
     starts: Vec<[f64; 2]>,
     // pub send_mess: Option<Sender<AttractorMess>>,
 }
@@ -134,7 +144,8 @@ impl AttractorCtx {
             anti_aliasing: gui_state.anti_aliasing,
             random_start: gui_state.random_start,
             last_change: Instant::now(),
-            multithreaded: false,
+            multithreaded: Multithreading::Single,
+            samples_per_iteration: SAMPLES_PER_ITERATION,
             starts: Vec::new(),
         }
     }
@@ -217,8 +228,13 @@ impl AttractorCtx {
         self.clear();
     }
 
-    fn set_multithreaded(&mut self, multithreaded: bool) {
+    fn set_multithreaded(&mut self, multithreaded: Multithreading) {
         self.multithreaded = multithreaded;
+        self.clear();
+    }
+
+    fn set_samples_per_iteration(&mut self, samples_per_iteration: u64) {
+        self.samples_per_iteration = samples_per_iteration;
         self.clear();
     }
 }
@@ -239,7 +255,8 @@ struct GuiState {
     rotating: bool,
     last_cursor_position: PhysicalPosition<f64>,
     random_start: bool,
-    multithreaded: bool,
+    multithreaded: Multithreading,
+    samples_per_iteration_text: String,
 }
 impl GuiState {
     fn set_seed(&mut self, seed: u64) {
@@ -252,6 +269,10 @@ impl GuiState {
 
     fn multisampling(&mut self) -> Option<u8> {
         self.multisampling_text.parse::<u8>().ok()
+    }
+
+    fn samples_per_iteration(&mut self) -> Option<u64> {
+        self.samples_per_iteration_text.parse::<u64>().ok()
     }
 }
 
@@ -289,7 +310,8 @@ fn main() {
         rotating: false,
         last_cursor_position: PhysicalPosition::default(),
         random_start: false,
-        multithreaded: false,
+        multithreaded: Multithreading::Single,
+        samples_per_iteration_text: SAMPLES_PER_ITERATION.to_string(),
     };
 
     // let mut attractor = AttractorCtx::new(&mut gui_state, size);
@@ -315,6 +337,9 @@ fn main() {
                     AttractorMess::SetMultithreaded(multithreaded) => {
                         attractor.set_multithreaded(multithreaded)
                     }
+                    AttractorMess::SetSamplesPerIteration(samples_per_iteration) => {
+                        attractor.set_samples_per_iteration(samples_per_iteration)
+                    }
                     AttractorMess::Resize(size) => attractor.resize(size, attractor.multisampling),
                     AttractorMess::Transform(affine) => attractor.transform(affine),
                 },
@@ -323,10 +348,10 @@ fn main() {
             }
         }
 
-        if attractor.multithreaded {
-            par_aggregate_attractor(&mut attractor);
-        } else {
-            aggregate_attractor(&mut attractor);
+        match attractor.multithreaded {
+            Multithreading::Single => aggregate_attractor(&mut attractor),
+            Multithreading::AtomicMulti => atomic_par_aggregate_attractor(&mut attractor),
+            Multithreading::MergeMulti => merge_par_aggregate_attractor(&mut attractor),
         }
 
         if sender_bitmap.is_closed() {
@@ -525,7 +550,7 @@ fn main() {
 }
 
 fn aggregate_attractor(attractor: &mut AttractorCtx) {
-    let samples = 1 << 14;
+    let samples = attractor.samples_per_iteration;
 
     if attractor.random_start {
         attractor.attractor.start = attractor
@@ -545,8 +570,8 @@ fn aggregate_attractor(attractor: &mut AttractorCtx) {
     attractor.total_samples += samples;
 }
 
-fn par_aggregate_attractor(attractor: &mut AttractorCtx) {
-    let samples = 1 << 14;
+fn atomic_par_aggregate_attractor(attractor: &mut AttractorCtx) {
+    let samples = attractor.samples_per_iteration;
 
     // convert &mut [i32] to &mut [AtomicI32]
     let bitmap: &mut [AtomicI32] = unsafe { std::mem::transmute(&mut attractor.bitmap[..]) };
@@ -588,6 +613,64 @@ fn par_aggregate_attractor(attractor: &mut AttractorCtx) {
             });
         }
     });
+}
+
+fn merge_par_aggregate_attractor(attractor: &mut AttractorCtx) {
+    let samples = attractor.samples_per_iteration;
+
+    let threads = 4;
+    if attractor.random_start {
+        attractor.starts.clear();
+    }
+    while attractor.starts.len() < threads {
+        let mut rng = rand::thread_rng();
+        attractor
+            .starts
+            .push(attractor.attractor.get_random_start_point(&mut rng));
+    }
+
+    // resize bitmap to hold multiple buffers
+    let len = attractor.size.width as usize
+        * attractor.multisampling as usize
+        * attractor.size.height as usize
+        * attractor.multisampling as usize;
+    attractor.bitmap.resize(threads * len, 0);
+
+    std::thread::scope(|s| {
+        let mut bitmap = attractor.bitmap.as_mut_slice();
+        for start in attractor.starts.iter_mut() {
+            attractor.total_samples += samples;
+            let size = attractor.size;
+            let multisampling = attractor.multisampling;
+            let anti_aliasing = attractor.anti_aliasing;
+
+            let mut at = attractor.attractor;
+
+            let b;
+            (b, bitmap) = bitmap.split_at_mut(len);
+
+            at.start = *start;
+            s.spawn(move || {
+                attractors::aggregate_to_bitmap(
+                    &mut at,
+                    size.width as usize * multisampling as usize,
+                    size.height as usize * multisampling as usize,
+                    samples,
+                    anti_aliasing,
+                    b,
+                    &mut 0,
+                );
+                *start = at.start;
+            });
+        }
+    });
+
+    // merge the buffers into one
+    for i in 0..len {
+        let sum = attractor.bitmap.iter().skip(i).step_by(len).sum::<i32>();
+        attractor.bitmap[i] = sum;
+    }
+    attractor.bitmap.truncate(len);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -682,12 +765,44 @@ fn build_ui(
 
         ui.end_row();
 
-        ui.label("multithreaded: ");
-        if ui
-            .add(Checkbox::new(&mut gui_state.multithreaded, ""))
-            .changed()
-        {
+        ui.label("multithreading: ");
+        let prev_multihreaded = gui_state.multithreaded;
+
+        ComboBox::new("multithreading", "")
+            .selected_text(format!("{:?}", gui_state.multithreaded))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut gui_state.multithreaded,
+                    Multithreading::Single,
+                    "Single",
+                );
+                ui.selectable_value(
+                    &mut gui_state.multithreaded,
+                    Multithreading::AtomicMulti,
+                    "AtomicMulti",
+                );
+                ui.selectable_value(
+                    &mut gui_state.multithreaded,
+                    Multithreading::MergeMulti,
+                    "MergeMulti",
+                );
+            });
+
+        if prev_multihreaded != gui_state.multithreaded {
             let _ = attractor_sender.send(AttractorMess::SetMultithreaded(gui_state.multithreaded));
+        }
+
+        ui.end_row();
+
+        ui.label("samples per iteration: ");
+        if ui
+            .text_edit_singleline(&mut gui_state.samples_per_iteration_text)
+            .lost_focus()
+        {
+            if let Some(samples_per_iteration) = gui_state.samples_per_iteration() {
+                let _ = attractor_sender
+                    .send(AttractorMess::SetSamplesPerIteration(samples_per_iteration));
+            }
         }
     })
 }
