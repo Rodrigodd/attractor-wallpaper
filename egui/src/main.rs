@@ -1,5 +1,5 @@
 use std::{
-    sync::mpsc::Sender,
+    sync::{atomic::AtomicI32, mpsc::Sender},
     time::{Duration, Instant},
 };
 
@@ -27,6 +27,7 @@ enum AttractorMess {
     SetAntialiasing(AntiAliasing),
     SetIntensity(f32),
     SetRandomStart(bool),
+    SetMultithreaded(bool),
     Resize(PhysicalSize<u32>),
     Transform(Affine),
 }
@@ -84,6 +85,8 @@ struct AttractorCtx {
     anti_aliasing: AntiAliasing,
     random_start: bool,
     last_change: Instant,
+    multithreaded: bool,
+    starts: Vec<[f64; 2]>,
     // pub send_mess: Option<Sender<AttractorMess>>,
 }
 impl AttractorCtx {
@@ -131,7 +134,8 @@ impl AttractorCtx {
             anti_aliasing: gui_state.anti_aliasing,
             random_start: gui_state.random_start,
             last_change: Instant::now(),
-            // send_mess: None,
+            multithreaded: false,
+            starts: Vec::new(),
         }
     }
 
@@ -212,6 +216,11 @@ impl AttractorCtx {
         self.random_start = random_start;
         self.clear();
     }
+
+    fn set_multithreaded(&mut self, multithreaded: bool) {
+        self.multithreaded = multithreaded;
+        self.clear();
+    }
 }
 
 fn square_bounds(width: f64, height: f64, border: f64) -> [f64; 4] {
@@ -230,6 +239,7 @@ struct GuiState {
     rotating: bool,
     last_cursor_position: PhysicalPosition<f64>,
     random_start: bool,
+    multithreaded: bool,
 }
 impl GuiState {
     fn set_seed(&mut self, seed: u64) {
@@ -279,6 +289,7 @@ fn main() {
         rotating: false,
         last_cursor_position: PhysicalPosition::default(),
         random_start: false,
+        multithreaded: false,
     };
 
     // let mut attractor = AttractorCtx::new(&mut gui_state, size);
@@ -301,6 +312,9 @@ fn main() {
                     AttractorMess::SetRandomStart(random_start) => {
                         attractor.set_random_start(random_start)
                     }
+                    AttractorMess::SetMultithreaded(multithreaded) => {
+                        attractor.set_multithreaded(multithreaded)
+                    }
                     AttractorMess::Resize(size) => attractor.resize(size, attractor.multisampling),
                     AttractorMess::Transform(affine) => attractor.transform(affine),
                 },
@@ -309,7 +323,11 @@ fn main() {
             }
         }
 
-        aggregate_attractor(&mut attractor);
+        if attractor.multithreaded {
+            par_aggregate_attractor(&mut attractor);
+        } else {
+            aggregate_attractor(&mut attractor);
+        }
 
         if sender_bitmap.is_closed() {
             break;
@@ -507,7 +525,7 @@ fn main() {
 }
 
 fn aggregate_attractor(attractor: &mut AttractorCtx) {
-    let samples = 4096;
+    let samples = 1 << 14;
 
     if attractor.random_start {
         attractor.attractor.start = attractor
@@ -525,6 +543,51 @@ fn aggregate_attractor(attractor: &mut AttractorCtx) {
         &mut 0,
     );
     attractor.total_samples += samples;
+}
+
+fn par_aggregate_attractor(attractor: &mut AttractorCtx) {
+    let samples = 1 << 14;
+
+    // convert &mut [i32] to &mut [AtomicI32]
+    let bitmap: &mut [AtomicI32] = unsafe { std::mem::transmute(&mut attractor.bitmap[..]) };
+
+    let threads = 4;
+    if attractor.random_start {
+        attractor.starts.clear();
+    }
+    while attractor.starts.len() < threads {
+        let mut rng = rand::thread_rng();
+        attractor
+            .starts
+            .push(attractor.attractor.get_random_start_point(&mut rng));
+    }
+
+    std::thread::scope(|s| {
+        for start in attractor.starts.iter_mut() {
+            attractor.total_samples += samples;
+            let size = attractor.size;
+            let multisampling = attractor.multisampling;
+            let anti_aliasing = attractor.anti_aliasing;
+
+            let mut at = attractor.attractor;
+
+            let bitmap: &[AtomicI32] = &*bitmap;
+
+            at.start = *start;
+            s.spawn(move || {
+                attractors::aggregate_to_bitmap(
+                    &mut at,
+                    size.width as usize * multisampling as usize,
+                    size.height as usize * multisampling as usize,
+                    samples,
+                    anti_aliasing,
+                    &mut &*bitmap,
+                    &mut AtomicI32::new(0),
+                );
+                *start = at.start;
+            });
+        }
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -615,6 +678,16 @@ fn build_ui(
             .changed()
         {
             let _ = attractor_sender.send(AttractorMess::SetRandomStart(gui_state.random_start));
+        }
+
+        ui.end_row();
+
+        ui.label("multithreaded: ");
+        if ui
+            .add(Checkbox::new(&mut gui_state.multithreaded, ""))
+            .changed()
+        {
+            let _ = attractor_sender.send(AttractorMess::SetMultithreaded(gui_state.multithreaded));
         }
     })
 }
