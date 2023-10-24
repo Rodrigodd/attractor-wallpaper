@@ -209,7 +209,6 @@ impl AttractorCtx {
     }
 
     fn set_multisampling(&mut self, multisampling: u8) {
-        self.multisampling = multisampling;
         self.resize(self.size, multisampling);
         self.clear();
     }
