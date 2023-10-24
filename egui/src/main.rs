@@ -484,6 +484,9 @@ fn main() {
                         render_state
                             .surface
                             .resize(new_size, &render_state.wgpu_state.device);
+
+                        // make sure the attractor is resized before the rendering.
+                        recv_bitmap.recv(|_| {});
                     }
                     _ => (),
                 }
