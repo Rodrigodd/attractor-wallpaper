@@ -483,9 +483,6 @@ fn main() {
                         render_state
                             .surface
                             .resize(new_size, &render_state.wgpu_state.device);
-
-                        // make sure the attractor is resized before the rendering.
-                        recv_bitmap.recv(|_| {});
                     }
                     _ => (),
                 }
@@ -493,6 +490,28 @@ fn main() {
             Event::MainEventsCleared => {
                 let mut total_sampĺes = 0;
                 recv_bitmap.recv(|at| {
+                    let rsize = render_state.attractor_renderer.size;
+                    let rsize = [
+                        rsize.width * render_state.attractor_renderer.multisampling as u32,
+                        rsize.height * render_state.attractor_renderer.multisampling as u32,
+                    ];
+                    let asize = at.size;
+                    let asize = [
+                        asize.width * at.multisampling as u32,
+                        asize.height * at.multisampling as u32,
+                    ];
+                    if asize != rsize {
+                        // don't update the bitmap if the attractor has not resized
+                        // yet
+                        return;
+                    }
+
+                    if at.total_samples < 100_000 {
+                        // don't update bitmap if there is not enough samples yet. This avoids
+                        // flickering while draggin the attractor.
+                        return;
+                    }
+
                     if at.last_change > last_change {
                         render_state
                             .attractor_renderer
