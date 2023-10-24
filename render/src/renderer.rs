@@ -263,7 +263,7 @@ impl WgpuState {
 
 pub struct AttractorRenderer {
     pub size: winit::dpi::PhysicalSize<u32>,
-    multisampling: u8,
+    pub multisampling: u8,
     output_format: wgpu::TextureFormat,
     render_pipeline: RenderPipeline,
     compute_pipeline: wgpu::ComputePipeline,

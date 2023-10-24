@@ -104,7 +104,7 @@ impl AttractorCtx {
         let width = size.width as usize;
         let height = size.height as usize;
         let seed = gui_state.seed().unwrap_or(0);
-        let multisampling = gui_state.multisampling().unwrap_or(1);
+        let multisampling = gui_state.multisampling();
         let rng = rand::rngs::SmallRng::seed_from_u64(seed);
         let mut attractor = Attractor::find_strange_attractor(rng, 1_000_000).unwrap();
 
@@ -247,7 +247,7 @@ fn square_bounds(width: f64, height: f64, border: f64) -> [f64; 4] {
 
 struct GuiState {
     seed_text: String,
-    multisampling_text: String,
+    multisampling: u8,
     anti_aliasing: AntiAliasing,
     intensity: f32,
     dragging: bool,
@@ -266,8 +266,8 @@ impl GuiState {
         self.seed_text.parse::<u64>().ok()
     }
 
-    fn multisampling(&mut self) -> Option<u8> {
-        self.multisampling_text.parse::<u8>().ok()
+    fn multisampling(&mut self) -> u8 {
+        self.multisampling
     }
 
     fn samples_per_iteration(&mut self) -> Option<u64> {
@@ -302,7 +302,7 @@ fn main() {
 
     let mut gui_state = GuiState {
         seed_text: 8742.to_string(),
-        multisampling_text: 1.to_string(),
+        multisampling: 1,
         anti_aliasing: attractors::AntiAliasing::None,
         intensity: 1.0,
         dragging: false,
@@ -730,17 +730,15 @@ fn build_ui(
 
         ui.label("multisampling: ");
         if ui
-            .my_text_field(&mut gui_state.multisampling_text)
-            .lost_focus()
+            .add(Slider::new(&mut gui_state.multisampling, 1..=6))
+            .changed()
         {
-            if let Some(multisampling) = gui_state.multisampling() {
-                let _ = attractor_sender.send(AttractorMess::SetMultisampling(multisampling));
-                render_state.attractor_renderer.recreate_aggregate_buffer(
-                    &render_state.wgpu_state.device,
-                    render_state.attractor_renderer.size,
-                    multisampling,
-                );
-            }
+            let _ = attractor_sender.send(AttractorMess::SetMultisampling(gui_state.multisampling));
+            render_state.attractor_renderer.recreate_aggregate_buffer(
+                &render_state.wgpu_state.device,
+                render_state.attractor_renderer.size,
+                gui_state.multisampling,
+            );
         }
 
         ui.end_row();
@@ -771,8 +769,12 @@ fn build_ui(
         ui.end_row();
 
         ui.label("intensity: ");
-        ui.add(Slider::new(&mut gui_state.intensity, 0.01..=2.0));
-        let _ = attractor_sender.send(AttractorMess::SetIntensity(gui_state.intensity));
+        if ui
+            .add(Slider::new(&mut gui_state.intensity, 0.01..=2.0))
+            .changed()
+        {
+            let _ = attractor_sender.send(AttractorMess::SetIntensity(gui_state.intensity));
+        }
 
         ui.end_row();
 
