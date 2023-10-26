@@ -182,7 +182,7 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
     }
 
     bitmap[0] = get_intensity(
-        base_intensity,
+        base_intensity as f32,
         total_samples,
         size,
         cli.multisampling,
@@ -435,7 +435,7 @@ pub async fn run_windowed(cli: Cli) {
                     }
                     total_samples += samples;
                     bitmap[0] = get_intensity(
-                        base_intensity,
+                        base_intensity as f32,
                         total_samples,
                         size,
                         cli.multisampling,
@@ -481,7 +481,7 @@ pub async fn run_windowed(cli: Cli) {
 }
 
 pub fn get_intensity(
-    base_intensity: i16,
+    base_intensity: f32,
     total_samples: u64,
     size: winit::dpi::PhysicalSize<u32>,
     multisampling: u8,
@@ -493,11 +493,11 @@ pub fn get_intensity(
         attractors::AntiAliasing::Lanczos => 64,
     };
 
-    (base_intensity as u64 * total_samples * 32 * p
-        / size.width as u64
-        / size.height as u64
-        / multisampling as u64
-        / multisampling as u64) as i32
+    (base_intensity * total_samples as f32 * 2.0 * p as f32
+        / size.width as f32
+        / size.height as f32
+        / multisampling as f32
+        / multisampling as f32) as i32
 }
 
 fn square_bounds(width: f64, height: f64, border: f64) -> [f64; 4] {

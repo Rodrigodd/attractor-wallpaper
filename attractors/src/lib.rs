@@ -10,6 +10,9 @@ type Bounds = [f64; 4];
 /// Matrix and translation vector
 pub type Affine = ([f64; 4], [f64; 2]);
 
+const THUMB_WIDTH: usize = 64;
+const THUMB_HEIGHT: usize = 64;
+
 #[derive(Debug, Clone, Copy)]
 pub enum Behavior {
     Convergent { after: usize, to: Point },
@@ -406,25 +409,27 @@ pub fn aggregate_to_bitmap<B: Buffer + ?Sized>(
     attractor.start = p;
 }
 
-pub fn generate_thumbnail(attractor: &Attractor) -> [i16; 256 * 256] {
-    const WIDTH: usize = 256;
-    const HEIGHT: usize = 256;
-    let samples = 256 * 256;
+pub fn generate_thumbnail(attractor: &Attractor) -> [i16; THUMB_WIDTH * THUMB_HEIGHT] {
+    let samples = 1 << 16;
 
-    let mut buffer = [0i16; WIDTH * HEIGHT];
+    let mut buffer = [0i16; THUMB_WIDTH * THUMB_HEIGHT];
     let mut attractor = *attractor;
 
     let bounds = attractor.get_bounds(samples);
 
-    assert_eq!(buffer.len(), WIDTH * HEIGHT);
+    assert_eq!(buffer.len(), THUMB_WIDTH * THUMB_HEIGHT);
 
     let mut p = attractor.start;
     let mut max = 0i16;
 
     for _ in 0..samples {
         p = attractor.step(p);
-        let pos = map_bounds(p, bounds, [0.0, WIDTH as f64, 0.0, HEIGHT as f64]);
-        draw_point(pos, WIDTH, HEIGHT, &mut buffer[..], &mut max);
+        let pos = map_bounds(
+            p,
+            bounds,
+            [0.0, THUMB_WIDTH as f64, 0.0, THUMB_HEIGHT as f64],
+        );
+        draw_point(pos, THUMB_WIDTH, THUMB_HEIGHT, &mut buffer[..], &mut max);
     }
 
     attractor.start = p;
@@ -462,16 +467,19 @@ fn select_nth(values: &mut [i16], nth: usize) -> i16 {
 pub fn get_base_intensity(attractor: &Attractor) -> i16 {
     let mut thumbnail = generate_thumbnail(attractor);
 
-    // compute the median intensity of non-zero values
-    let mut last = thumbnail.len();
+    const THRESHOLD: i16 = 2;
+
+    // compute the median intensity of values greater than THRESHOLD
+    let mut count = thumbnail.len();
+
     let mut i = 0;
-    while i < last {
-        if thumbnail[i] > 0 {
+    while i < count {
+        if thumbnail[i] > THRESHOLD {
             i += 1;
             continue;
         }
-        last -= 1;
-        thumbnail.swap(i, last);
+        count -= 1;
+        thumbnail.swap(i, count);
     }
 
     ascii_histogram(
@@ -482,14 +490,14 @@ pub fn get_base_intensity(attractor: &Attractor) -> i16 {
     );
     ascii_histogram(
         "thumbnail non-zero intensity",
-        &thumbnail.map(|x| x as f64)[0..last],
+        &thumbnail.map(|x| x as f64)[0..count],
         10.0,
         false,
     );
 
-    let m = select_nth(&mut thumbnail[0..last], last / 4);
+    let m = select_nth(&mut thumbnail[0..count], count * 3 / 4);
 
-    println!("base intensity: {}", m);
+    println!("base intensity: {} (count {})", m, count);
 
     m
 }

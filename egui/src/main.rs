@@ -204,6 +204,9 @@ impl AttractorCtx {
 
             attractor = attractor.transform_input(affine);
         };
+
+        self.base_intensity = attractors::get_base_intensity(&attractor);
+
         self.attractor = attractor;
         self.clear();
     }
@@ -519,7 +522,7 @@ fn main() {
                     }
 
                     at.bitmap[0] = render::get_intensity(
-                        (at.base_intensity as f32 / at.intensity) as i16,
+                        at.base_intensity as f32 / at.intensity,
                         at.total_samples,
                         at.size,
                         at.multisampling,
@@ -770,7 +773,7 @@ fn build_ui(
 
         ui.label("intensity: ");
         if ui
-            .add(Slider::new(&mut gui_state.intensity, 0.01..=2.0))
+            .add(Slider::new(&mut gui_state.intensity, 0.01..=4.0))
             .changed()
         {
             let _ = attractor_sender.send(AttractorMess::SetIntensity(gui_state.intensity));
