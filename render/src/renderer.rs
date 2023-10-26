@@ -678,7 +678,7 @@ fn convolution_code(kernel: &[f32], multisampling: u8, side: usize) -> String {
                 dj, di
             );
             let c = format!(
-                "c += colormap(f32({}) / f32(aggregate_buffer[0])) * {:?};\n",
+                "c += color(f32({}) / f32(aggregate_buffer[0]), in.tex_coords.x, in.tex_coords.y) * {:?};\n",
                 v, k
             );
             code.push_str(&c);
