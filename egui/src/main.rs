@@ -179,6 +179,7 @@ impl AttractorCtx {
                 new_size.height as usize * new_multisampling as usize,
             ),
         );
+        self.starts.clear();
         self.clear();
     }
 
