@@ -13,3 +13,5 @@ render = { path = "../render" }
 attractors = { path = "../attractors" }
 rand = "0.8.5"
 egui_extras = "0.23.0"
+wallpaper = "3.2.0"
+image = "0.24.7"

@@ -1,5 +1,6 @@
 use std::{
     sync::{atomic::AtomicI32, mpsc::Sender},
+    thread::JoinHandle,
     time::{Duration, Instant},
 };
 
@@ -260,6 +261,8 @@ struct GuiState {
     random_start: bool,
     multithreaded: Multithreading,
     samples_per_iteration_text: String,
+    total_samples_text: String,
+    wallpaper_thread: Option<JoinHandle<AttractorCtx>>,
 }
 impl GuiState {
     fn set_seed(&mut self, seed: u64) {
@@ -276,6 +279,10 @@ impl GuiState {
 
     fn samples_per_iteration(&mut self) -> Option<u64> {
         self.samples_per_iteration_text.parse::<u64>().ok()
+    }
+
+    fn total_samples(&mut self) -> Option<u64> {
+        self.total_samples_text.parse::<u64>().ok()
     }
 }
 
@@ -315,6 +322,8 @@ fn main() {
         random_start: false,
         multithreaded: Multithreading::Single,
         samples_per_iteration_text: SAMPLES_PER_ITERATION.to_string(),
+        total_samples_text: 10_000_000.to_string(),
+        wallpaper_thread: None,
     };
 
     // let mut attractor = AttractorCtx::new(&mut gui_state, size);
@@ -322,6 +331,7 @@ fn main() {
     let (attractor_sender, recv_conf) = std::sync::mpsc::channel::<AttractorMess>();
     let (mut sender_bitmap, mut recv_bitmap) = channel::channel::<AttractorCtx>();
     let mut attractor = AttractorCtx::new(&mut gui_state, size);
+
     std::thread::spawn(move || loop {
         loop {
             match recv_conf.try_recv() {
@@ -547,9 +557,11 @@ fn main() {
                                 ui,
                                 &mut gui_state,
                                 &attractor_sender,
+                                &mut recv_bitmap,
                                 total_sampĺes,
                                 last_change,
                                 render_state,
+                                &mut executor,
                             );
                             // ui.allocate_space(ui.available_size());
                         });
@@ -703,9 +715,11 @@ fn build_ui(
     ui: &mut Ui,
     gui_state: &mut GuiState,
     attractor_sender: &Sender<AttractorMess>,
+    attractor_recv: &mut channel::Receiver<AttractorCtx>,
     total_samples: u64,
     last_change: Instant,
     render_state: &mut RenderState,
+    executor: &mut WinitExecutor<UserEvent>,
 ) -> egui::InnerResponse<()> {
     Grid::new("options_grid").show(ui, |ui| {
         ui.label(format!(
@@ -831,6 +845,115 @@ fn build_ui(
                     .send(AttractorMess::SetSamplesPerIteration(samples_per_iteration));
             }
         }
+
+        ui.end_row();
+
+        ui.separator();
+
+        ui.end_row();
+
+        ui.label("total samples: ");
+
+        ui.text_edit_singleline(&mut gui_state.total_samples_text);
+
+        ui.end_row();
+
+        if gui_state.wallpaper_thread.is_some() {
+            ui.spinner();
+        } else if ui.button("Set as wallpaper").clicked() {
+            let mut attractor = attractor_recv
+                .recv(|x| AttractorCtx { ..x.clone() })
+                .unwrap();
+
+            let monitor_size = render_state
+                .surface
+                .window()
+                .current_monitor()
+                .unwrap()
+                .size();
+
+            attractor.resize(monitor_size, attractor.multisampling);
+            attractor.samples_per_iteration = gui_state.total_samples().unwrap();
+
+            let multithreaded = gui_state.multithreaded;
+
+            let handle = std::thread::spawn(move || {
+                match multithreaded {
+                    Multithreading::Single => aggregate_attractor(&mut attractor),
+                    Multithreading::AtomicMulti => atomic_par_aggregate_attractor(&mut attractor),
+                    Multithreading::MergeMulti => merge_par_aggregate_attractor(&mut attractor),
+                }
+                attractor
+            });
+
+            gui_state.wallpaper_thread = Some(handle);
+        }
+
+        if gui_state
+            .wallpaper_thread
+            .as_mut()
+            .map_or(false, |x| x.is_finished())
+        {
+            let wallpaper_handle = gui_state.wallpaper_thread.take().unwrap();
+
+            let AttractorCtx {
+                mut bitmap,
+                size,
+                base_intensity,
+                total_samples,
+                multisampling,
+                anti_aliasing,
+                ..
+            } = wallpaper_handle.join().unwrap();
+
+            let task = async move {
+                let wgpu_state = WgpuState::new_headless().await.unwrap();
+                let mut attractor_renderer = AttractorRenderer::new(
+                    &wgpu_state.device,
+                    size,
+                    wgpu::TextureFormat::Rgba8UnormSrgb,
+                    multisampling,
+                )
+                .unwrap();
+
+                bitmap[0] = render::get_intensity(
+                    base_intensity as f32,
+                    total_samples,
+                    size,
+                    multisampling,
+                    anti_aliasing,
+                );
+                attractor_renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
+
+                let texture = wgpu_state.new_target_texture(size);
+                let view = texture.create_view(&Default::default());
+                attractor_renderer.render(&wgpu_state.device, &wgpu_state.queue, false, &view);
+
+                let bitmap = wgpu_state.copy_texture_content(texture);
+
+                let path = "wallpaper.png";
+
+                image::save_buffer(
+                    path,
+                    &bitmap,
+                    size.width,
+                    size.height,
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+
+                // kill swaybg
+                println!("killing swaybg");
+                let _ = std::process::Command::new("killall").arg("swaybg").output();
+
+                println!("setting wallpaper");
+                wallpaper::set_from_path(path).unwrap();
+                println!("wallpaper set");
+            };
+            executor.spawn(task);
+        }
+
+        ui.end_row();
     })
 }
 

@@ -191,7 +191,6 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
     renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
 
     let texture = wgpu_state.new_target_texture(size);
-
     let view = texture.create_view(&Default::default());
     renderer.render(
         &wgpu_state.device,
