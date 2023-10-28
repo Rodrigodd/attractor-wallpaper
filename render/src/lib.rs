@@ -16,12 +16,6 @@ use wasm_bindgen::prelude::*;
 const BORDER: f64 = 0.1;
 
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-enum RenderBackend {
-    Cpu,
-    Gpu,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 enum AntiAliasing {
     None,
     Bilinear,
@@ -40,10 +34,6 @@ impl AntiAliasing {
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// The backend to use for rendering.
-    #[arg(short, long, default_value = "cpu")]
-    backend: RenderBackend,
-
     /// Spawn a window in fullscreen mode. In headless mode, make the output image the same size as
     /// the focused monitor.
     #[arg(short, long, default_value = "false")]
@@ -192,12 +182,7 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
 
     let texture = wgpu_state.new_target_texture(size);
     let view = texture.create_view(&Default::default());
-    renderer.render(
-        &wgpu_state.device,
-        &wgpu_state.queue,
-        cli.backend == RenderBackend::Gpu,
-        &view,
-    );
+    renderer.render(&wgpu_state.device, &wgpu_state.queue, &view);
 
     let bitmap = wgpu_state.copy_texture_content(texture);
 
@@ -286,8 +271,6 @@ pub async fn run_windowed(cli: Cli) {
         cli.multisampling,
     );
 
-    renderer.load_attractor(&wgpu_state.queue, &attractor);
-
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::UserEvent(UserEvent::RebuildRenderer((w, s, r))) => {
@@ -342,7 +325,6 @@ pub async fn run_windowed(cli: Cli) {
 
                     renderer.resize(&wgpu_state.device, physical_size);
                     state.resize(physical_size, &wgpu_state.device);
-                    renderer.load_attractor(&wgpu_state.queue, &attractor);
                 }
                 WindowEvent::CloseRequested
                 | WindowEvent::KeyboardInput {
@@ -396,7 +378,6 @@ pub async fn run_windowed(cli: Cli) {
                         seed,
                         cli.multisampling,
                     );
-                    renderer.load_attractor(&wgpu_state.queue, &attractor);
                     println!("attractor: {:?}", attractor);
                 }
                 _ => {}
@@ -416,42 +397,35 @@ pub async fn run_windowed(cli: Cli) {
                 }
                 last_frame_time = Some(std::time::Instant::now());
 
-                if let RenderBackend::Cpu = cli.backend {
-                    let samples = 400_000;
-                    let size = state.window().inner_size();
-                    let mut max = 0;
-                    attractors::aggregate_to_bitmap(
-                        &mut attractor,
-                        size.width as usize * cli.multisampling as usize,
-                        size.height as usize * cli.multisampling as usize,
-                        samples,
-                        cli.anti_aliasing.into_attractors_antialiasing(),
-                        &mut bitmap[..],
-                        &mut max,
-                    );
-                    if max == i32::MAX {
-                        println!("max reached");
-                    }
-                    total_samples += samples;
-                    bitmap[0] = get_intensity(
-                        base_intensity as f32,
-                        total_samples,
-                        size,
-                        cli.multisampling,
-                        cli.anti_aliasing.into_attractors_antialiasing(),
-                    );
-                    renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
+                let samples = 400_000;
+                let size = state.window().inner_size();
+                let mut max = 0;
+                attractors::aggregate_to_bitmap(
+                    &mut attractor,
+                    size.width as usize * cli.multisampling as usize,
+                    size.height as usize * cli.multisampling as usize,
+                    samples,
+                    cli.anti_aliasing.into_attractors_antialiasing(),
+                    &mut bitmap[..],
+                    &mut max,
+                );
+                if max == i32::MAX {
+                    println!("max reached");
                 }
+                total_samples += samples;
+                bitmap[0] = get_intensity(
+                    base_intensity as f32,
+                    total_samples,
+                    size,
+                    cli.multisampling,
+                    cli.anti_aliasing.into_attractors_antialiasing(),
+                );
+                renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
 
                 match state.current_texture() {
                     Ok(texture) => {
                         let view = texture.texture.create_view(&Default::default());
-                        renderer.render(
-                            &wgpu_state.device,
-                            &wgpu_state.queue,
-                            cli.backend == RenderBackend::Gpu,
-                            &view,
-                        );
+                        renderer.render(&wgpu_state.device, &wgpu_state.queue, &view);
                         texture.present();
                     }
                     Err(e) => {

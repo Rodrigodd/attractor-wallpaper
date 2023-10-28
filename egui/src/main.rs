@@ -526,12 +526,6 @@ fn main() {
                         return;
                     }
 
-                    if at.last_change > last_change {
-                        render_state
-                            .attractor_renderer
-                            .load_attractor(&render_state.wgpu_state.queue, &at.attractor);
-                    }
-
                     at.bitmap[0] = render::get_intensity(
                         at.base_intensity as f32 / at.intensity,
                         at.total_samples,
@@ -927,7 +921,7 @@ fn build_ui(
 
                 let texture = wgpu_state.new_target_texture(size);
                 let view = texture.create_view(&Default::default());
-                attractor_renderer.render(&wgpu_state.device, &wgpu_state.queue, false, &view);
+                attractor_renderer.render(&wgpu_state.device, &wgpu_state.queue, &view);
 
                 let bitmap = wgpu_state.copy_texture_content(texture);
 

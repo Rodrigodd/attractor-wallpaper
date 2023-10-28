@@ -13,8 +13,6 @@ use wgpu::{
 };
 use winit::window::Window;
 
-const NUM_OF_PARTICLES: u32 = 512;
-
 pub struct SurfaceState {
     surface: Surface,
     // SAFETY: window must come after surface, because surface must be dropped before window.
@@ -266,14 +264,11 @@ pub struct AttractorRenderer {
     pub multisampling: u8,
     output_format: wgpu::TextureFormat,
     render_pipeline: RenderPipeline,
-    compute_pipeline: wgpu::ComputePipeline,
     bind_group: BindGroup,
     pipeline_layout: wgpu::PipelineLayout,
     aggregate_buffer: wgpu::Buffer,
     uniforms_buffer: wgpu::Buffer,
     bind_group_layout: wgpu::BindGroupLayout,
-    particles: wgpu::Buffer,
-    attractor_buffer: wgpu::Buffer,
 }
 
 impl AttractorRenderer {
@@ -284,15 +279,6 @@ impl AttractorRenderer {
         multisampling: u8,
     ) -> Result<Self, Box<dyn Error>> {
         let aggregate_buffer = gen_aggreate_buffer(device, size, multisampling);
-
-        let particles = device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: NUM_OF_PARTICLES as u64 * 2 * 4,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
 
         let uniforms = Uniforms {
             screen_width: size.width,
@@ -305,15 +291,6 @@ impl AttractorRenderer {
             usage: wgpu::BufferUsages::UNIFORM
                 | wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST,
-        });
-
-        let attractor_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("attractor"),
-            size: 64,
-            usage: wgpu::BufferUsages::UNIFORM
-                | wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
         });
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -341,28 +318,6 @@ impl AttractorRenderer {
                     },
                     count: None,
                 },
-                // particles
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // attractor
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
             ],
         });
 
@@ -377,11 +332,8 @@ impl AttractorRenderer {
             &bind_group_layout,
             &uniforms_buffer,
             &aggregate_buffer,
-            &particles,
-            &attractor_buffer,
         );
 
-        let compute_pipeline = create_compute_pipeline(device, &pipeline_layout)?;
         let render_pipeline =
             create_render_pipeline(device, output_format, &pipeline_layout, multisampling)?;
 
@@ -390,14 +342,11 @@ impl AttractorRenderer {
             multisampling,
             output_format,
             render_pipeline,
-            compute_pipeline,
             bind_group,
             pipeline_layout,
             aggregate_buffer,
             uniforms_buffer,
             bind_group_layout,
-            particles,
-            attractor_buffer,
         })
     }
 
@@ -419,8 +368,6 @@ impl AttractorRenderer {
             &self.bind_group_layout,
             &self.uniforms_buffer,
             &self.aggregate_buffer,
-            &self.particles,
-            &self.attractor_buffer,
         );
 
         if multisampling != self.multisampling {
@@ -448,58 +395,16 @@ impl AttractorRenderer {
         self.recreate_aggregate_buffer(device, new_size, self.multisampling);
     }
 
-    pub fn load_attractor(&mut self, queue: &Queue, attractor: &attractors::Attractor) {
-        let attractor = AttractorF32 {
-            a: attractor.a.map(|x| x as f32),
-            b: attractor.b.map(|x| x as f32),
-            start: attractor.start.map(|x| x as f32),
-        };
-
-        queue.write_buffer(
-            &self.attractor_buffer,
-            0,
-            bytemuck::cast_slice(&[attractor]),
-        );
-        self.load_particles(queue, [attractor.start[0], attractor.start[1]]);
-    }
-
-    pub fn load_particles(&mut self, queue: &Queue, start: [f32; 2]) {
-        let content = std::array::from_fn::<[f32; 2], { NUM_OF_PARTICLES as usize }, _>(|i| {
-            let sx = start[0];
-            let sy = start[1];
-            let radius = 0.001;
-            let w = (NUM_OF_PARTICLES as f32).sqrt().ceil() as usize;
-            let dx = (i % w) as f32 / w as f32 * radius;
-            let dy = (i / w) as f32 / w as f32 * radius;
-            [sx + dx, sy + dy]
-        });
-        queue.write_buffer(&self.particles, 0, bytemuck::cast_slice(&content));
-    }
-
     pub fn load_aggragate_buffer(&mut self, queue: &Queue, buffer: &[i32]) {
         queue.write_buffer(&self.aggregate_buffer, 0, bytemuck::cast_slice(buffer));
     }
 
-    pub fn render(
-        &mut self,
-        device: &Device,
-        queue: &Queue,
-        compute: bool,
-        view: &wgpu::TextureView,
-    ) {
+    pub fn render(&mut self, device: &Device, queue: &Queue, view: &wgpu::TextureView) {
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("Render Encoder"),
         });
 
         self.set_uniforms(queue);
-
-        if compute {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Compute Pass"),
-            });
-
-            self.compute_particles(&mut compute_pass);
-        }
 
         {
             let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -519,13 +424,6 @@ impl AttractorRenderer {
         }
 
         queue.submit(std::iter::once(encoder.finish()));
-    }
-
-    pub fn compute_particles<'a>(&'a mut self, compute_pass: &mut wgpu::ComputePass<'a>) {
-        compute_pass.set_pipeline(&self.compute_pipeline);
-        compute_pass.set_bind_group(0, &self.bind_group, &[]);
-
-        compute_pass.dispatch_workgroups(NUM_OF_PARTICLES, 1, 1)
     }
 
     pub fn render_aggregate_buffer<'a>(&'a mut self, render_pass: &mut wgpu::RenderPass<'a>) {
@@ -571,8 +469,6 @@ fn create_bind_group(
     bind_group_layout: &wgpu::BindGroupLayout,
     uniforms_buffer: &wgpu::Buffer,
     aggregate_buffer: &wgpu::Buffer,
-    particles: &wgpu::Buffer,
-    attractor_buffer: &wgpu::Buffer,
 ) -> BindGroup {
     device.create_bind_group(&BindGroupDescriptor {
         label: None,
@@ -587,16 +483,6 @@ fn create_bind_group(
             BindGroupEntry {
                 binding: 1,
                 resource: aggregate_buffer.as_entire_binding(),
-            },
-            // particles
-            BindGroupEntry {
-                binding: 2,
-                resource: particles.as_entire_binding(),
-            },
-            // attractor
-            BindGroupEntry {
-                binding: 3,
-                resource: attractor_buffer.as_entire_binding(),
             },
         ],
     })
@@ -615,27 +501,6 @@ struct AttractorF32 {
     a: [f32; 6],
     b: [f32; 6],
     start: [f32; 2],
-}
-
-fn create_compute_pipeline(
-    device: &Device,
-    pipeline_layout: &wgpu::PipelineLayout,
-) -> Result<wgpu::ComputePipeline, Box<dyn Error>> {
-    let source = std::fs::read_to_string("render/src/compute.wgsl")?;
-    let shader = device.create_shader_module(ShaderModuleDescriptor {
-        label: Some("Shader"),
-        source: ShaderSource::Wgsl(source.into()),
-    });
-
-    let compute_pipeline_layout =
-        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: None,
-            layout: Some(pipeline_layout),
-            module: &shader,
-            entry_point: "main",
-        });
-
-    Ok(compute_pipeline_layout)
 }
 
 fn convolution_code(kernel: &[f32], multisampling: u8, side: usize) -> String {
