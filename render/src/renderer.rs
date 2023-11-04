@@ -283,6 +283,11 @@ impl AttractorRenderer {
         let uniforms = Uniforms {
             screen_width: size.width,
             screen_height: size.height,
+            _padding: [0; 8],
+            bg_color_1: [0.012, 0.0, 0.0, 1.0],
+            bg_color_2: [0.004, 0.0, 0.0, 1.0],
+            bg_point_1: [0.9, 0.3],
+            bg_point_2: [0.2, 1.0],
         };
 
         let uniforms_buffer = device.create_buffer_init(&BufferInitDescriptor {
@@ -404,7 +409,7 @@ impl AttractorRenderer {
             label: Some("Render Encoder"),
         });
 
-        self.set_uniforms(queue);
+        self.update_uniforms(queue);
 
         {
             let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -433,14 +438,46 @@ impl AttractorRenderer {
         render_pass.draw(0..3, 0..1);
     }
 
-    pub fn set_uniforms(&mut self, queue: &Queue) {
+    #[allow(clippy::ptr_eq)]
+    pub fn update_uniforms(&mut self, queue: &Queue) {
+        assert!({
+            let x = Uniforms {
+                screen_width: self.size.width,
+                screen_height: self.size.height,
+                ..Default::default()
+            };
+            (&x as *const Uniforms as usize) == (&x.screen_width as *const u32 as usize)
+                && (&x as *const Uniforms as usize + 4) == (&x.screen_height as *const u32 as usize)
+        });
+
         queue.write_buffer(
             &self.uniforms_buffer,
             0,
-            bytemuck::cast_slice(&[Uniforms {
+            bytemuck::cast_slice(&[self.size.width, self.size.height]),
+        );
+    }
+
+    #[allow(clippy::ptr_eq)]
+    pub fn set_background_color(
+        &self,
+        queue: &Queue,
+        background_color_1: [f32; 4],
+        background_color_2: [f32; 4],
+    ) {
+        assert!({
+            let x = Uniforms {
                 screen_width: self.size.width,
                 screen_height: self.size.height,
-            }]),
+                ..Default::default()
+            };
+            (&x as *const Uniforms as usize) == (&x.screen_width as *const u32 as usize)
+                && (&x as *const Uniforms as usize + 4) == (&x.screen_height as *const u32 as usize)
+        });
+
+        queue.write_buffer(
+            &self.uniforms_buffer,
+            16,
+            bytemuck::cast_slice(&[background_color_1, background_color_2]),
         );
     }
 }
@@ -489,10 +526,15 @@ fn create_bind_group(
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Default, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
     screen_width: u32,
     screen_height: u32,
+    _padding: [u8; 8],
+    bg_color_1: [f32; 4],
+    bg_color_2: [f32; 4],
+    bg_point_1: [f32; 2],
+    bg_point_2: [f32; 2],
 }
 
 #[repr(C)]
@@ -543,7 +585,7 @@ fn convolution_code(kernel: &[f32], multisampling: u8, side: usize) -> String {
                 dj, di
             );
             let c = format!(
-                "c += color(f32({}) / f32(aggregate_buffer[0]), in.tex_coords.x, in.tex_coords.y) * {:?};\n",
+                "c += color(f32({}) / f32(aggregate_buffer[0]), p) * {:?};\n",
                 v, k
             );
             code.push_str(&c);

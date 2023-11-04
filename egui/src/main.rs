@@ -16,7 +16,12 @@ use egui_winit::winit::{
 };
 use rand::prelude::*;
 
+mod colors;
+mod widgets;
+
 use render::{AttractorRenderer, SurfaceState, TaskId, WgpuState, WinitExecutor};
+
+use crate::colors::LinSrgb;
 
 const BORDER: f64 = 0.1;
 const SAMPLES_PER_ITERATION: u64 = 1_000_000;
@@ -263,6 +268,8 @@ struct GuiState {
     samples_per_iteration_text: String,
     total_samples_text: String,
     wallpaper_thread: Option<JoinHandle<AttractorCtx>>,
+    background_color_1: [f32; 4],
+    background_color_2: [f32; 4],
 }
 impl GuiState {
     fn set_seed(&mut self, seed: u64) {
@@ -324,6 +331,8 @@ fn main() {
         samples_per_iteration_text: SAMPLES_PER_ITERATION.to_string(),
         total_samples_text: 10_000_000.to_string(),
         wallpaper_thread: None,
+        background_color_1: [0.012, 0.0, 0.0, 1.0],
+        background_color_2: [0.004, 0.0, 0.0, 1.0],
     };
 
     // let mut attractor = AttractorCtx::new(&mut gui_state, size);
@@ -852,6 +861,33 @@ fn build_ui(
 
         ui.end_row();
 
+        ui.label("background color 1: ");
+
+        if ui
+            .my_color_picker(&mut gui_state.background_color_1)
+            .changed()
+        {
+            render_state.attractor_renderer.set_background_color(
+                &render_state.wgpu_state.queue,
+                gui_state.background_color_1,
+                gui_state.background_color_2,
+            );
+        }
+        ui.end_row();
+
+        ui.label("background color 2: ");
+        if ui
+            .my_color_picker(&mut gui_state.background_color_2)
+            .changed()
+        {
+            render_state.attractor_renderer.set_background_color(
+                &render_state.wgpu_state.queue,
+                gui_state.background_color_1,
+                gui_state.background_color_2,
+            );
+        }
+        ui.end_row();
+
         if gui_state.wallpaper_thread.is_some() {
             ui.spinner();
         } else if ui.button("Set as wallpaper").clicked() {
@@ -982,7 +1018,7 @@ fn render_frame(
         ],
         pixels_per_point: 1.0,
     };
-    render_state.attractor_renderer.set_uniforms(queue);
+    render_state.attractor_renderer.update_uniforms(queue);
     render_state.egui_renderer.update_buffers(
         device,
         queue,
@@ -1015,10 +1051,94 @@ fn render_frame(
 
 trait MyUiExt {
     fn my_text_field(&mut self, text: &mut String) -> Response;
+    fn my_color_picker(&mut self, rgba: &mut [f32; 4]) -> Response;
 }
 
 impl MyUiExt for Ui {
     fn my_text_field(&mut self, text: &mut String) -> Response {
         self.add_sized([180.0, self.available_height()], TextEdit::singleline(text))
     }
+
+    fn my_color_picker(&mut self, lin_rgba: &mut [f32; 4]) -> Response {
+        let ui = self;
+        let hsva = egui::epaint::Hsva::from_rgba_unmultiplied(
+            lin_rgba[0],
+            lin_rgba[1],
+            lin_rgba[2],
+            lin_rgba[3],
+        );
+        let lin_rgb = colors::LinSrgb {
+            red: lin_rgba[0] as f64,
+            green: lin_rgba[1] as f64,
+            blue: lin_rgba[2] as f64,
+        };
+        let mut srgb = colors::Srgb::from(lin_rgb);
+
+        let popup_id = ui.auto_id_with("popup");
+        let open = ui.memory(|mem| mem.is_popup_open(popup_id));
+        let mut button_response = color_button(ui, hsva.into(), open);
+        if ui.style().explanation_tooltips {
+            button_response = button_response.on_hover_text("Click to edit color");
+        }
+
+        if button_response.clicked() {
+            ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+        }
+
+        const COLOR_SLIDER_WIDTH: f32 = 100.0;
+
+        // TODO(emilk): make it easier to show a temporary popup that closes when you click outside it
+        if ui.memory(|mem| mem.is_popup_open(popup_id)) {
+            let area_response = egui::Area::new(popup_id)
+                .order(egui::Order::Foreground)
+                .fixed_pos(button_response.rect.max)
+                .constrain(true)
+                .show(ui.ctx(), |ui| {
+                    ui.spacing_mut().slider_width = COLOR_SLIDER_WIDTH;
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        if widgets::ok_picker::okhsv::color_picker_2d(ui, &mut srgb) {
+                            button_response.mark_changed();
+                        }
+                    });
+                })
+                .response;
+
+            if !button_response.clicked()
+                && (ui.input(|i| i.key_pressed(egui::Key::Escape))
+                    || area_response.clicked_elsewhere())
+            {
+                ui.memory_mut(|mem| mem.close_popup());
+            }
+        }
+
+        let lin_rgb = LinSrgb::from(srgb);
+        lin_rgba[0] = lin_rgb.red as f32;
+        lin_rgba[1] = lin_rgb.green as f32;
+        lin_rgba[2] = lin_rgb.blue as f32;
+
+        button_response
+    }
+}
+
+fn color_button(ui: &mut Ui, color: egui::Color32, open: bool) -> Response {
+    let size = ui.spacing().interact_size;
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::new(egui::WidgetType::ColorButton));
+
+    if ui.is_rect_visible(rect) {
+        let visuals = if open {
+            &ui.visuals().widgets.open
+        } else {
+            ui.style().interact(&response)
+        };
+        let rect = rect.expand(visuals.expansion);
+
+        egui::color_picker::show_color_at(ui.painter(), color, rect);
+
+        let rounding = visuals.rounding.at_most(2.0);
+        ui.painter()
+            .rect_stroke(rect, rounding, (2.0, visuals.bg_fill)); // fill is intentional, because default style has no border
+    }
+
+    response
 }

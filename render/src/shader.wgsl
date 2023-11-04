@@ -27,6 +27,14 @@ fn vs_main(
 struct Uniforms {
   screenWidth: u32,
   screenHeight: u32,
+  /// background gradient color 1
+  bg_color_1: vec4<f32>,
+  /// background gradient color 2
+  bg_color_2: vec4<f32>,
+  /// background gradient point 1, in clip space
+  bg_point_1: vec2<f32>,
+  /// background gradient point 2, in clip space
+  bg_point_2: vec2<f32>,
 };
 
 // MULTISAMPLING here is replaced by a custom preprocessor. This in the future
@@ -50,6 +58,8 @@ fn lanczos_kernel(x: f32) -> f32 {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
+    let p = vec2(in.tex_coords.x, in.tex_coords.y);
+
     let iy = u32(in.tex_coords.y * f32(uniforms.screenHeight));
     let ix = u32(in.tex_coords.x * f32(uniforms.screenWidth));
     let i0 = 
@@ -71,9 +81,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4(d,1.0);
 }
 
-fn color(c: f32, x: f32, y: f32) -> vec4<f32> {
-    let background =  gradient(x, y);
-    let foreground =  colormap(c);
+fn color(c: f32, p: vec2<f32>) -> vec4<f32> {
+    let background = gradient(p);
+    let foreground = colormap(c);
 
     let alpha = clamp(c * 10.0, 0.0, 1.0);
     return mix(background, foreground, alpha);
@@ -92,18 +102,19 @@ fn screen_space_dither(frag_coord: vec2<f32>) -> vec3<f32> {
     return (dither - 0.5) / 255.0;
 }
 
-fn gradient(x: f32, y: f32) -> vec4<f32> { 
-    let start = vec4<f32>(0.012, 0.000, 0.0, 1.0);
-    let end = vec4<f32>(0.004, 0.000, 0.0, 1.0);
+fn gradient(p: vec2<f32>) -> vec4<f32> { 
+    let c1 = uniforms.bg_color_1;
+    let c2 = uniforms.bg_color_2;
 
-    let center = vec2<f32>(0.9, 0.3);
-    let radius = 1.2;
+    let p1 = uniforms.bg_point_1;
+    let p2 = uniforms.bg_point_2;
+    let radius = distance(p1, p2);
 
-    let dist = distance(vec2<f32>(x, y), center);
+    let dist = distance(p, p1);
 
-    let z = dist / radius;
+    let t = pow(dist / radius, 0.33);
 
-    return mix(start, end, pow(z,0.33));
+    return mix(c1, c2, t);
 }
 
 fn colormap(x: f32) -> vec4<f32> {
