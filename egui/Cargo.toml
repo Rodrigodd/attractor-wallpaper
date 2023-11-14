@@ -11,6 +11,7 @@ egui-wgpu = "0.23.0"
 egui-winit = "0.23.0"
 render = { path = "../render" }
 attractors = { path = "../attractors" }
+oklab = { path = "../oklab" }
 rand = "0.8.5"
 egui_extras = "0.23.0"
 wallpaper = "3.2.0"

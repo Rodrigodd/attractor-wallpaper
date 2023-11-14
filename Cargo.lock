@@ -210,6 +210,7 @@ dependencies = [
  "egui-winit",
  "egui_extras",
  "image",
+ "oklab",
  "rand",
  "render",
  "wallpaper",
@@ -1689,6 +1690,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bda667d9f2b5051b8833f59f3bf748b28ef54f850f4fcb389a252aa383866d1"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "oklab"
+version = "0.1.0"
+dependencies = [
+ "rand",
 ]
 
 [[package]]

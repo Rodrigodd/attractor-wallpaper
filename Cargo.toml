@@ -1,6 +1,6 @@
 [workspace]
 
-members = ["attractors", "render", "egui"]
+members = ["attractors", "render", "egui", "oklab"]
 
 [profile.dev.package."*"]
 opt-level = 3

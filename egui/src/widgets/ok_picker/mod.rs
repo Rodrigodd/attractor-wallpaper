@@ -7,10 +7,21 @@ use egui::{
     Rgba, Sense, Shape, Stroke, Ui, Vec2,
 };
 
-use crate::colors::{OkHsl, OkHsv, Srgb};
+use oklab::{OkHsl, OkHsv, Srgb};
 
 pub mod okhsl;
 pub mod okhsv;
+
+trait ToColor32 {
+    fn to_color32(self) -> Color32;
+}
+impl<T: Into<Srgb> + Clone> ToColor32 for T {
+    fn to_color32(self) -> Color32 {
+        let srgb: Srgb = self.into();
+        let srgb8 = srgb.to_srgb8();
+        Color32::from_rgb(srgb8.r, srgb8.g, srgb8.b)
+    }
+}
 
 /// Number of vertices per dimension in the color sliders.
 /// We need at least 6 for hues, and more for smooth 2D areas.
@@ -26,11 +37,11 @@ fn color_text_rgb_dec_ui(ui: &mut Ui, color: impl Into<Srgb>) {
         ),
         Layout::left_to_right(Align::Center),
         |ui| {
-            let Srgb { red, green, blue } = color;
+            let Srgb { r, g, b } = color;
 
-            let r = (256.0 * red).floor() as u8;
-            let g = (256.0 * green).floor() as u8;
-            let b = (256.0 * blue).floor() as u8;
+            let r = (256.0 * r).floor() as u8;
+            let g = (256.0 * g).floor() as u8;
+            let b = (256.0 * b).floor() as u8;
 
             // if ui.button("📋").on_hover_text("Click to copy").clicked() {
             //     ui.output().copied_text = format!("{}, {}, {}", r, g, b);
@@ -51,17 +62,17 @@ fn color_text_rgb_hex_ui(ui: &mut Ui, color: impl Into<Srgb>) {
         ),
         Layout::left_to_right(Align::Center),
         |ui| {
-            let Srgb { red, green, blue } = color;
+            let Srgb { r, g, b } = color;
 
-            let r = (256.0 * red).floor() as u8;
-            let g = (256.0 * green).floor() as u8;
-            let b = (256.0 * blue).floor() as u8;
+            let r = (256.0 * r).floor() as u8;
+            let g = (256.0 * g).floor() as u8;
+            let b = (256.0 * b).floor() as u8;
 
-            // if ui.button("📋").on_hover_text("Click to copy").clicked() {
-            //     ui.output().copied_text = format!("#{:02X}{:02X}{:02X}", r, g, b);
-            // }
+            if ui.button("📋").on_hover_text("Click to copy").clicked() {
+                ui.output_mut(|x| x.copied_text = format!("#{:02X}{:02X}{:02X}", r, g, b));
+            }
 
-            ui.label(format!("rgb(#{:02X}{:02X}{:02X})", r, g, b))
+            ui.label(format!("#{:02X}{:02X}{:02X}", r, g, b))
                 .on_hover_text("Red Green Blue, Hex");
         },
     );
@@ -80,13 +91,13 @@ fn color_text_okhsv_ui(ui: &mut Ui, color: impl Into<OkHsv>) {
             // }
 
             // Approx 512 even steps for the rounding
-            let trunc = 1.0 / 2.0_f64.powi(8);
+            let trunc = 1.0 / 2.0_f32.powi(8);
 
             ui.label(format!(
                 "okhsv({}, {}, {})",
-                trunc * (hsv.hue / trunc).trunc(),
-                trunc * (hsv.saturation / trunc).trunc(),
-                trunc * (hsv.value / trunc).trunc()
+                trunc * (hsv.h / trunc).trunc(),
+                trunc * (hsv.s / trunc).trunc(),
+                trunc * (hsv.v / trunc).trunc()
             ))
             .on_hover_text("Hue Saturation Value, OkHSV");
         },
@@ -108,13 +119,13 @@ fn color_text_okhsl_ui(ui: &mut Ui, color: impl Into<OkHsl>) {
             // }
 
             // Approx 512 even steps for the rounding
-            let trunc = 1.0 / 2.0_f64.powi(8);
+            let trunc = 1.0 / 2.0_f32.powi(8);
 
             ui.label(format!(
                 "okhsl({}, {}, {})",
-                trunc * (hsl.hue / trunc).trunc(),
-                trunc * (hsl.saturation / trunc).trunc(),
-                trunc * (hsl.lightness / trunc).trunc()
+                trunc * (hsl.h / trunc).trunc(),
+                trunc * (hsl.s / trunc).trunc(),
+                trunc * (hsl.l / trunc).trunc()
             ))
             .on_hover_text("Hue Saturation Lightness, OkHSL");
         },
@@ -131,10 +142,10 @@ pub fn color_text_ui(ui: &mut Ui, color: impl Into<Srgb>) {
 
 fn color_slider_1d(
     ui: &mut Ui,
-    value: &mut f64,
-    min: f64,
-    max: f64,
-    color_at: impl Fn(f64) -> OkHsv,
+    value: &mut f32,
+    min: f32,
+    max: f32,
+    color_at: impl Fn(f32) -> Color32,
 ) -> Response {
     #![allow(clippy::identity_op)]
 
@@ -147,7 +158,7 @@ fn color_slider_1d(
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
     if let Some(mpos) = response.interact_pointer_pos() {
-        *value = min + span * remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0) as f64;
+        *value = min + span * remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
     }
 
     if ui.is_rect_visible(rect) {
@@ -159,14 +170,14 @@ fn color_slider_1d(
             // fill color:
             let mut mesh = Mesh::default();
             for i in 0..=N {
-                let t = min + (i as f64 * span / (N as f64));
+                let t = min + (i as f32 * span / (N as f32));
+
                 let color = color_at(t);
-                let x = lerp(
-                    rect.left()..=rect.right(),
-                    (t as f32 - min as f32) / span as f32,
-                );
-                mesh.colored_vertex(pos2(x, rect.top()), color.into());
-                mesh.colored_vertex(pos2(x, rect.bottom()), color.into());
+
+                let x = lerp(rect.left()..=rect.right(), (t - min) / span);
+
+                mesh.colored_vertex(pos2(x, rect.top()), color);
+                mesh.colored_vertex(pos2(x, rect.bottom()), color);
                 if i < N {
                     mesh.add_triangle(2 * i + 0, 2 * i + 1, 2 * i + 2);
                     mesh.add_triangle(2 * i + 1, 2 * i + 2, 2 * i + 3);
@@ -179,10 +190,7 @@ fn color_slider_1d(
 
         {
             // Show where the slider is at:
-            let x = lerp(
-                rect.left()..=rect.right(),
-                (*value as f32 - min as f32) / span as f32,
-            );
+            let x = lerp(rect.left()..=rect.right(), (*value - min) / span);
             let r = rect.height() / 4.0;
             let picked_color = color_at(*value);
             ui.painter().add(Shape::convex_polygon(
@@ -202,10 +210,10 @@ fn color_slider_1d(
 
 fn color_slider_vertical_1d(
     ui: &mut Ui,
-    value: &mut f64,
-    min: f64,
-    max: f64,
-    color_at: impl Fn(f64) -> OkHsv,
+    value: &mut f32,
+    min: f32,
+    max: f32,
+    color_at: impl Fn(f32) -> Color32,
 ) -> Response {
     #![allow(clippy::identity_op)]
 
@@ -218,7 +226,7 @@ fn color_slider_vertical_1d(
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
     if let Some(mpos) = response.interact_pointer_pos() {
-        *value = min + span * remap_clamp(mpos.y, rect.top()..=rect.bottom(), 0.0..=1.0) as f64;
+        *value = min + span * remap_clamp(mpos.y, rect.top()..=rect.bottom(), 0.0..=1.0);
     }
 
     if ui.is_rect_visible(rect) {
@@ -230,14 +238,11 @@ fn color_slider_vertical_1d(
             // fill color:
             let mut mesh = Mesh::default();
             for i in 0..=N {
-                let t = min + (i as f64 * span / (N as f64));
+                let t = min + (i as f32 * span / (N as f32));
                 let color = color_at(t);
-                let y = lerp(
-                    rect.top()..=rect.bottom(),
-                    (t as f32 - min as f32) / span as f32,
-                );
-                mesh.colored_vertex(pos2(rect.left(), y), color.into());
-                mesh.colored_vertex(pos2(rect.right(), y), color.into());
+                let y = lerp(rect.top()..=rect.bottom(), (t - min) / span);
+                mesh.colored_vertex(pos2(rect.left(), y), color);
+                mesh.colored_vertex(pos2(rect.right(), y), color);
                 if i < N {
                     mesh.add_triangle(2 * i + 0, 2 * i + 1, 2 * i + 2);
                     mesh.add_triangle(2 * i + 1, 2 * i + 2, 2 * i + 3);
@@ -250,10 +255,7 @@ fn color_slider_vertical_1d(
 
         {
             // Show where the slider is at:
-            let y = lerp(
-                rect.top()..=rect.bottom(),
-                (*value as f32 - min as f32) / span as f32,
-            );
+            let y = lerp(rect.top()..=rect.bottom(), (*value - min) / span);
             let r = rect.width() / 4.0;
             let picked_color = color_at(*value);
             ui.painter().add(Shape::convex_polygon(
@@ -273,9 +275,9 @@ fn color_slider_vertical_1d(
 
 fn color_slider_2d<T>(
     ui: &mut Ui,
-    x_value: &mut f64,
-    y_value: &mut f64,
-    color_at: impl Fn(f64, f64) -> T,
+    x_value: &mut f32,
+    y_value: &mut f32,
+    color_at: impl Fn(f32, f32) -> T,
 ) -> Response
 where
     T: Into<Color32> + Copy,
@@ -285,8 +287,8 @@ where
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
     if let Some(mpos) = response.interact_pointer_pos() {
-        *x_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0) as f64;
-        *y_value = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0) as f64;
+        *x_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
+        *y_value = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
     }
 
     if ui.is_rect_visible(rect) {
@@ -295,11 +297,11 @@ where
 
         for xi in 0..=N {
             for yi in 0..=N {
-                let xt = xi as f64 / (N as f64);
-                let yt = yi as f64 / (N as f64);
+                let xt = xi as f32 / (N as f32);
+                let yt = yi as f32 / (N as f32);
                 let color = color_at(xt, yt);
-                let x = lerp(rect.left()..=rect.right(), xt as f32);
-                let y = lerp(rect.bottom()..=rect.top(), yt as f32);
+                let x = lerp(rect.left()..=rect.right(), xt);
+                let y = lerp(rect.bottom()..=rect.top(), yt);
                 mesh.colored_vertex(pos2(x, y), color.into());
 
                 if xi < N && yi < N {
@@ -316,8 +318,8 @@ where
         ui.painter().rect_stroke(rect, 0.0, visuals.bg_stroke); // outline
 
         // Show where the slider is at:
-        let x = lerp(rect.left()..=rect.right(), *x_value as f32);
-        let y = lerp(rect.bottom()..=rect.top(), *y_value as f32);
+        let x = lerp(rect.left()..=rect.right(), *x_value);
+        let y = lerp(rect.bottom()..=rect.top(), *y_value);
         let picked_color = color_at(*x_value, *y_value);
         ui.painter().add(epaint::CircleShape {
             center: pos2(x, y),
@@ -330,11 +332,11 @@ where
     response
 }
 
-fn color_slider_circle<T>(
+pub fn color_slider_circle<T>(
     ui: &mut Ui,
-    r: &mut f64,
-    angle: &mut f64,
-    color_at: impl Fn(f64, f64) -> T,
+    r: &mut f32,
+    angle: &mut f32,
+    color_at: impl Fn(f32, f32) -> T,
 ) -> Response
 where
     T: Into<Color32> + Copy,
@@ -347,10 +349,10 @@ where
     if let Some(mpos) = response.interact_pointer_pos() {
         let current_pos = mpos - rect.center();
         let current_r = current_pos.length();
-        *r = remap_clamp(current_r.into(), 0.0..=r_max.into(), 0.0..=1.0);
+        *r = remap_clamp(current_r, 0.0..=r_max, 0.0..=1.0);
         // y goes down, so we flip the angle to get the
         // trigonometry normal direction
-        *angle = (-1.0 * current_pos.angle()).into();
+        *angle = -1.0 * current_pos.angle();
     }
 
     if ui.is_rect_visible(rect) {
@@ -359,15 +361,15 @@ where
 
         for ri in 0..=N {
             for anglei in 0..=N {
-                let rt = ri as f64 / (N as f64);
-                let anglet = 2.0 * std::f64::consts::PI * anglei as f64 / (N as f64);
+                let rt = ri as f32 / (N as f32);
+                let anglet = 2.0 * std::f32::consts::PI * anglei as f32 / (N as f32);
                 let color = color_at(rt, anglet);
                 let (x_norm, y_norm) = (
                     (rt * anglet.cos() + 1.0) / 2.0,
                     (rt * anglet.sin() + 1.0) / 2.0,
                 );
-                let x = lerp(rect.left()..=rect.right(), x_norm as f32);
-                let y = lerp(rect.bottom()..=rect.top(), y_norm as f32);
+                let x = lerp(rect.left()..=rect.right(), x_norm);
+                let y = lerp(rect.bottom()..=rect.top(), y_norm);
                 mesh.colored_vertex(pos2(x, y), color.into());
 
                 if ri < N && anglei < N {
@@ -393,8 +395,8 @@ where
             (*r * angle.cos() + 1.0) / 2.0,
             (*r * angle.sin() + 1.0) / 2.0,
         );
-        let x = lerp(rect.left()..=rect.right(), x_norm as f32);
-        let y = lerp(rect.bottom()..=rect.top(), y_norm as f32);
+        let x = lerp(rect.left()..=rect.right(), x_norm);
+        let y = lerp(rect.bottom()..=rect.top(), y_norm);
         let picked_color = color_at(*r, *angle);
         ui.painter().add(epaint::CircleShape {
             center: pos2(x, y),

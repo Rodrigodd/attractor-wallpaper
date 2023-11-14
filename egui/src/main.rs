@@ -16,17 +16,13 @@ use egui_winit::winit::{
 };
 use rand::prelude::*;
 
-mod colors;
-mod widgets;
-
 use render::{AttractorRenderer, SurfaceState, TaskId, WgpuState, WinitExecutor};
 
-use crate::colors::LinSrgb;
+mod channel;
+pub mod widgets;
 
 const BORDER: f64 = 0.1;
 const SAMPLES_PER_ITERATION: u64 = 1_000_000;
-
-mod channel;
 
 enum AttractorMess {
     SetSeed(u64),
@@ -1067,12 +1063,12 @@ impl MyUiExt for Ui {
             lin_rgba[2],
             lin_rgba[3],
         );
-        let lin_rgb = colors::LinSrgb {
-            red: lin_rgba[0] as f64,
-            green: lin_rgba[1] as f64,
-            blue: lin_rgba[2] as f64,
+        let lin_rgb = oklab::LinSrgb {
+            r: lin_rgba[0],
+            g: lin_rgba[1],
+            b: lin_rgba[2],
         };
-        let mut srgb = colors::Srgb::from(lin_rgb);
+        let mut srgb = oklab::Srgb::from(lin_rgb);
 
         let popup_id = ui.auto_id_with("popup");
         let open = ui.memory(|mem| mem.is_popup_open(popup_id));
@@ -1111,10 +1107,10 @@ impl MyUiExt for Ui {
             }
         }
 
-        let lin_rgb = LinSrgb::from(srgb);
-        lin_rgba[0] = lin_rgb.red as f32;
-        lin_rgba[1] = lin_rgb.green as f32;
-        lin_rgba[2] = lin_rgb.blue as f32;
+        let lin_rgb = oklab::LinSrgb::from(srgb);
+        lin_rgba[0] = lin_rgb.r;
+        lin_rgba[1] = lin_rgb.g;
+        lin_rgba[2] = lin_rgb.b;
 
         button_response
     }
