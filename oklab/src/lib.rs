@@ -122,13 +122,33 @@ pub struct Oklab {
     pub b: f32,
 }
 
+/// Represents a color in the Oklch color space.
+///
+/// This is a transformation of the Oklab color space, where the chromaticityies `a` and `b` are
+/// represented in polar coordinates, as chroma and hue.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
+pub struct OkLch {
+    /// Perceived lightness.
+    pub l: f32,
+    /// Chroma, normally in the range [0.0, 1.0].
+    pub c: f32,
+    /// Hue, normally in the range [0.0, 1.0].
+    pub h: f32,
+}
+impl OkLch {
+    /// Create a new color with the given lightness, chroma and hue.
+    pub fn new(l: f32, c: f32, h: f32) -> Self {
+        Self { l, c, h }
+    }
+}
+
 /// Represents a color in the okHsv color space.
 ///
 /// This color space is similar to the HSV color space, but the with a perceptually uniform
 /// saturation and value, based on the Oklab/OkLCh color space.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
 pub struct OkHsv {
-    /// Hue, as in the OkLCh color space.
+    /// Hue, as in the OkLCh color space, in the range [0.0, 1.0].
     pub h: f32,
     /// Saturation, normally in the range [0.0, 1.0].
     pub s: f32,
@@ -162,7 +182,7 @@ impl From<Srgb> for Srgb8 {
 /// saturation and lightness, based on the Oklab/OkLCh color space.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
 pub struct OkHsl {
-    /// Hue, as in the OkLCh color space.
+    /// Hue, as in the OkLCh color space, in the range [0.0, 1.0]
     pub h: f32,
     /// Saturation, normally in the range [0.0, 1.0].
     pub s: f32,
@@ -177,6 +197,13 @@ impl From<LinSrgb> for Srgb {
 }
 impl From<Oklab> for Srgb {
     fn from(oklab: Oklab) -> Self {
+        let lin_srgb = ok_color::oklab_to_linear_srgb(oklab);
+        ok_color::linear_srgb_to_srgb(lin_srgb)
+    }
+}
+impl From<OkLch> for Srgb {
+    fn from(okclh: OkLch) -> Self {
+        let oklab = ok_color::oklch_to_oklab(okclh);
         let lin_srgb = ok_color::oklab_to_linear_srgb(oklab);
         ok_color::linear_srgb_to_srgb(lin_srgb)
     }
@@ -199,6 +226,12 @@ impl From<Srgb> for LinSrgb {
 }
 impl From<Oklab> for LinSrgb {
     fn from(oklab: Oklab) -> Self {
+        ok_color::oklab_to_linear_srgb(oklab)
+    }
+}
+impl From<OkLch> for LinSrgb {
+    fn from(okclh: OkLch) -> Self {
+        let oklab = ok_color::oklch_to_oklab(okclh);
         ok_color::oklab_to_linear_srgb(oklab)
     }
 }
@@ -226,6 +259,11 @@ impl From<LinSrgb> for Oklab {
         ok_color::linear_srgb_to_oklab(lin_srgb)
     }
 }
+impl From<OkLch> for Oklab {
+    fn from(okclh: OkLch) -> Self {
+        ok_color::oklch_to_oklab(okclh)
+    }
+}
 impl From<OkHsl> for Oklab {
     fn from(okhsl: OkHsl) -> Self {
         let srgb = ok_color::okhsl_to_srgb(okhsl);
@@ -238,6 +276,37 @@ impl From<OkHsv> for Oklab {
         let srgb = ok_color::okhsv_to_srgb(okhsv);
         let lin_srgb = ok_color::srgb_to_linear_srgb(srgb);
         ok_color::linear_srgb_to_oklab(lin_srgb)
+    }
+}
+
+impl From<Srgb> for OkLch {
+    fn from(srgb: Srgb) -> Self {
+        let lin_srgb = ok_color::srgb_to_linear_srgb(srgb);
+        let oklab = ok_color::linear_srgb_to_oklab(lin_srgb);
+        ok_color::oklab_to_oklch(oklab)
+    }
+}
+impl From<LinSrgb> for OkLch {
+    fn from(lin_srgb: LinSrgb) -> Self {
+        let oklab = ok_color::linear_srgb_to_oklab(lin_srgb);
+        ok_color::oklab_to_oklch(oklab)
+    }
+}
+impl From<Oklab> for OkLch {
+    fn from(oklab: Oklab) -> Self {
+        ok_color::oklab_to_oklch(oklab)
+    }
+}
+impl From<OkHsl> for OkLch {
+    fn from(okhsl: OkHsl) -> Self {
+        let oklab = ok_color::okhsl_to_oklab(okhsl);
+        ok_color::oklab_to_oklch(oklab)
+    }
+}
+impl From<OkHsv> for OkLch {
+    fn from(okhsv: OkHsv) -> Self {
+        let oklab = ok_color::okhsv_to_oklab(okhsv);
+        ok_color::oklab_to_oklch(oklab)
     }
 }
 
@@ -257,6 +326,12 @@ impl From<Oklab> for OkHsl {
         let lin_srgb = ok_color::oklab_to_linear_srgb(oklab);
         let srgb = ok_color::linear_srgb_to_srgb(lin_srgb);
         ok_color::srgb_to_okhsl(srgb)
+    }
+}
+impl From<OkLch> for OkHsl {
+    fn from(okclh: OkLch) -> Self {
+        let oklab = ok_color::oklch_to_oklab(okclh);
+        ok_color::oklab_to_okhsl(oklab)
     }
 }
 impl From<OkHsv> for OkHsl {
@@ -282,6 +357,12 @@ impl From<Oklab> for OkHsv {
         let lin_srgb = ok_color::oklab_to_linear_srgb(oklab);
         let srgb = ok_color::linear_srgb_to_srgb(lin_srgb);
         ok_color::srgb_to_okhsv(srgb)
+    }
+}
+impl From<OkLch> for OkHsv {
+    fn from(okclh: OkLch) -> Self {
+        let oklab = ok_color::oklch_to_oklab(okclh);
+        ok_color::oklab_to_okhsv(oklab)
     }
 }
 impl From<OkHsl> for OkHsv {

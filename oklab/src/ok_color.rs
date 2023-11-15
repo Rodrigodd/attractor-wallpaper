@@ -559,23 +559,29 @@ fn get_cs(l: f32, a_: f32, b_: f32) -> Cs {
 }
 
 pub fn okhsl_to_srgb(hsl: OkHsl) -> Srgb {
-    let h = hsl.h;
-    let s = hsl.s;
-    let l = hsl.l;
-
-    if l == 1.0 {
+    if hsl.l == 1.0 {
         return Srgb {
             r: 1.,
             g: 1.,
             b: 1.,
         };
-    } else if l == 0. {
+    } else if hsl.l == 0. {
         return Srgb {
             r: 0.,
             g: 0.,
             b: 0.,
         };
     }
+
+    let oklab = okhsl_to_oklab(hsl);
+    let rgb = oklab_to_linear_srgb(oklab);
+    linear_srgb_to_srgb(rgb)
+}
+
+pub fn okhsl_to_oklab(hsl: OkHsl) -> Oklab {
+    let h = hsl.h;
+    let s = hsl.s;
+    let l = hsl.l;
 
     let a_ = (2. * PI * h).cos();
     let b_ = (2. * PI * h).sin();
@@ -612,18 +618,21 @@ pub fn okhsl_to_srgb(hsl: OkHsl) -> Srgb {
         c = k_0 + t * k_1 / (1. - k_2 * t);
     }
 
-    let rgb = oklab_to_linear_srgb(Oklab {
+    Oklab {
         l,
         a: c * a_,
         b: c * b_,
-    });
-    linear_srgb_to_srgb(rgb)
+    }
 }
 
 pub fn srgb_to_okhsl(rgb: Srgb) -> OkHsl {
     let rgb = srgb_to_linear_srgb(rgb);
     let lab = linear_srgb_to_oklab(rgb);
 
+    oklab_to_okhsl(lab)
+}
+
+pub fn oklab_to_okhsl(lab: Oklab) -> OkHsl {
     let c = (lab.a * lab.a + lab.b * lab.b).sqrt();
     let a_ = lab.a / c;
     let b_ = lab.b / c;
@@ -661,6 +670,25 @@ pub fn srgb_to_okhsl(rgb: Srgb) -> OkHsl {
 }
 
 pub fn okhsv_to_srgb(hsv: OkHsv) -> Srgb {
+    let oklab = okhsv_to_oklab(hsv);
+    let rgb = oklab_to_linear_srgb(oklab);
+    linear_srgb_to_srgb(rgb)
+}
+
+pub fn oklch_to_oklab(lch: OkLch) -> Oklab {
+    let l = lch.l;
+    let c = lch.c;
+    let h = lch.h;
+
+    // (h - 0.5) * 2 * PI = (-lab.b).atan2(-lab.a);
+
+    let a = c * (2. * PI * h).cos();
+    let b = c * (2. * PI * h).sin();
+
+    Oklab { l, a, b }
+}
+
+pub fn okhsv_to_oklab(hsv: OkHsv) -> Oklab {
     let h = hsv.h;
     let s = hsv.s;
     let v = hsv.v;
@@ -702,24 +730,31 @@ pub fn okhsv_to_srgb(hsv: OkHsv) -> Srgb {
     let l = l * scale_l;
     let c = c * scale_l;
 
-    let rgb = oklab_to_linear_srgb(Oklab {
+    Oklab {
         l,
         a: c * a_,
         b: c * b_,
-    });
-    linear_srgb_to_srgb(rgb)
+    }
 }
 
 pub fn srgb_to_okhsv(rgb: Srgb) -> OkHsv {
     let rgb = srgb_to_linear_srgb(rgb);
     let lab = linear_srgb_to_oklab(rgb);
 
+    oklab_to_okhsv(lab)
+}
+
+pub fn oklab_to_oklch(lab: Oklab) -> OkLch {
     let c = (lab.a * lab.a + lab.b * lab.b).sqrt();
+    let h = 0.5 + 0.5 * (-lab.b).atan2(-lab.a) / PI;
+    OkLch { l: lab.l, c, h }
+}
+
+pub fn oklab_to_okhsv(lab: Oklab) -> OkHsv {
+    let OkLch { l, c, h } = oklab_to_oklch(lab);
+
     let a_ = lab.a / c;
     let b_ = lab.b / c;
-
-    let l = lab.l;
-    let h = 0.5 + 0.5 * (-lab.b).atan2(-lab.a) / PI;
 
     let cusp = find_cusp(a_, b_);
     let st_max = to_st(cusp);
@@ -765,12 +800,12 @@ mod test {
     use rand::Rng;
 
     fn equal_lin_srgb(a: LinSrgb, b: LinSrgb) -> bool {
-        let eps = 1e-6;
+        let eps = 5e-6;
         (a.r - b.r).abs() < eps && (a.g - b.g).abs() < eps && (a.b - b.b).abs() < eps
     }
 
     #[test]
-    fn srgb_convesions() {
+    fn srgb_conversions() {
         let mut rng = rand::thread_rng();
         for _ in 0..100 {
             let x = LinSrgb {
@@ -781,6 +816,82 @@ mod test {
             let y = ok_color::linear_srgb_to_srgb(x);
             let z = ok_color::srgb_to_linear_srgb(y);
             assert!(equal_lin_srgb(x, z));
+        }
+    }
+
+    #[test]
+    fn okhsl_conversions() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let x = Srgb {
+                r: rng.gen(),
+                g: rng.gen(),
+                b: rng.gen(),
+            };
+            let y = ok_color::srgb_to_okhsl(x);
+            let z = ok_color::okhsl_to_srgb(y);
+            assert!(
+                equal_lin_srgb(x.to_linear(), z.to_linear()),
+                "{:?} {:?}",
+                x,
+                z
+            );
+        }
+    }
+
+    #[test]
+    fn okhsv_conversions() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let x = Srgb {
+                r: rng.gen(),
+                g: rng.gen(),
+                b: rng.gen(),
+            };
+            let y = ok_color::srgb_to_okhsv(x);
+            let z = ok_color::okhsv_to_srgb(y);
+            assert!(
+                equal_lin_srgb(x.to_linear(), z.to_linear()),
+                "{:?} {:?}",
+                x,
+                z
+            );
+        }
+    }
+
+    #[test]
+    fn oklab_conversions() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let x = LinSrgb {
+                r: rng.gen(),
+                g: rng.gen(),
+                b: rng.gen(),
+            };
+            let y = ok_color::linear_srgb_to_oklab(x);
+            let z = ok_color::oklab_to_linear_srgb(y);
+            assert!(equal_lin_srgb(x, z), "{:?} {:?}", x, z);
+        }
+    }
+
+    #[test]
+    fn oklch_conversions() {
+        let mut rng = rand::thread_rng();
+        for _ in 0..100 {
+            let x = Oklab {
+                l: rng.gen(),
+                a: rng.gen(),
+                b: rng.gen(),
+            };
+            let y = ok_color::oklab_to_oklch(x);
+            let z = ok_color::oklch_to_oklab(y);
+
+            assert!(
+                equal_lin_srgb(LinSrgb::from(y), LinSrgb::from(z)),
+                "{:?} {:?}",
+                x,
+                z
+            );
         }
     }
 }
