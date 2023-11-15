@@ -14,9 +14,12 @@ use egui_winit::winit::{
     platform::wayland::WindowBuilderExtWayland,
     window::{Window, WindowBuilder},
 };
+use oklab::{LinSrgb, OkLch};
 use rand::prelude::*;
 
 use render::{AttractorRenderer, SurfaceState, TaskId, WgpuState, WinitExecutor};
+
+use crate::widgets::ok_picker::ToColor32;
 
 mod channel;
 pub mod widgets;
@@ -264,8 +267,8 @@ struct GuiState {
     samples_per_iteration_text: String,
     total_samples_text: String,
     wallpaper_thread: Option<JoinHandle<AttractorCtx>>,
-    background_color_1: [f32; 4],
-    background_color_2: [f32; 4],
+    background_color_1: OkLch,
+    background_color_2: OkLch,
 }
 impl GuiState {
     fn set_seed(&mut self, seed: u64) {
@@ -327,8 +330,8 @@ fn main() {
         samples_per_iteration_text: SAMPLES_PER_ITERATION.to_string(),
         total_samples_text: 10_000_000.to_string(),
         wallpaper_thread: None,
-        background_color_1: [0.012, 0.0, 0.0, 1.0],
-        background_color_2: [0.004, 0.0, 0.0, 1.0],
+        background_color_1: OkLch::new(0.1, 1.0, 0.05),
+        background_color_2: OkLch::new(0.05, 1.0, 0.05),
     };
 
     // let mut attractor = AttractorCtx::new(&mut gui_state, size);
@@ -863,10 +866,12 @@ fn build_ui(
             .my_color_picker(&mut gui_state.background_color_1)
             .changed()
         {
+            let c1 = LinSrgb::from(gui_state.background_color_1).clip();
+            let c2 = LinSrgb::from(gui_state.background_color_2).clip();
             render_state.attractor_renderer.set_background_color(
                 &render_state.wgpu_state.queue,
-                gui_state.background_color_1,
-                gui_state.background_color_2,
+                [c1.r, c1.g, c1.b, 1.0],
+                [c2.r, c2.g, c2.b, 1.0],
             );
         }
         ui.end_row();
@@ -876,10 +881,12 @@ fn build_ui(
             .my_color_picker(&mut gui_state.background_color_2)
             .changed()
         {
+            let c1 = LinSrgb::from(gui_state.background_color_1).clip();
+            let c2 = LinSrgb::from(gui_state.background_color_2).clip();
             render_state.attractor_renderer.set_background_color(
                 &render_state.wgpu_state.queue,
-                gui_state.background_color_1,
-                gui_state.background_color_2,
+                [c1.r, c1.g, c1.b, 1.0],
+                [c2.r, c2.g, c2.b, 1.0],
             );
         }
         ui.end_row();
@@ -1047,7 +1054,7 @@ fn render_frame(
 
 trait MyUiExt {
     fn my_text_field(&mut self, text: &mut String) -> Response;
-    fn my_color_picker(&mut self, rgba: &mut [f32; 4]) -> Response;
+    fn my_color_picker(&mut self, oklch: &mut OkLch) -> Response;
 }
 
 impl MyUiExt for Ui {
@@ -1055,24 +1062,12 @@ impl MyUiExt for Ui {
         self.add_sized([180.0, self.available_height()], TextEdit::singleline(text))
     }
 
-    fn my_color_picker(&mut self, lin_rgba: &mut [f32; 4]) -> Response {
+    fn my_color_picker(&mut self, oklch: &mut OkLch) -> Response {
         let ui = self;
-        let hsva = egui::epaint::Hsva::from_rgba_unmultiplied(
-            lin_rgba[0],
-            lin_rgba[1],
-            lin_rgba[2],
-            lin_rgba[3],
-        );
-        let lin_rgb = oklab::LinSrgb {
-            r: lin_rgba[0],
-            g: lin_rgba[1],
-            b: lin_rgba[2],
-        };
-        let mut srgb = oklab::Srgb::from(lin_rgb);
 
         let popup_id = ui.auto_id_with("popup");
         let open = ui.memory(|mem| mem.is_popup_open(popup_id));
-        let mut button_response = color_button(ui, hsva.into(), open);
+        let mut button_response = color_button(ui, oklch.to_color32(), open);
         if ui.style().explanation_tooltips {
             button_response = button_response.on_hover_text("Click to edit color");
         }
@@ -1092,7 +1087,7 @@ impl MyUiExt for Ui {
                 .show(ui.ctx(), |ui| {
                     ui.spacing_mut().slider_width = COLOR_SLIDER_WIDTH;
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        if widgets::ok_picker::okhsv::color_picker_2d(ui, &mut srgb) {
+                        if widgets::ok_picker::okhsv::color_picker_2d(ui, oklch) {
                             button_response.mark_changed();
                         }
                     });
@@ -1106,11 +1101,6 @@ impl MyUiExt for Ui {
                 ui.memory_mut(|mem| mem.close_popup());
             }
         }
-
-        let lin_rgb = oklab::LinSrgb::from(srgb);
-        lin_rgba[0] = lin_rgb.r;
-        lin_rgba[1] = lin_rgb.g;
-        lin_rgba[2] = lin_rgb.b;
 
         button_response
     }

@@ -12,7 +12,7 @@ use oklab::{OkHsl, OkHsv, Srgb};
 pub mod okhsl;
 pub mod okhsv;
 
-trait ToColor32 {
+pub trait ToColor32 {
     fn to_color32(self) -> Color32;
 }
 impl<T: Into<Srgb> + Clone> ToColor32 for T {
