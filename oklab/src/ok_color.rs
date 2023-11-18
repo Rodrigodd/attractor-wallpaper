@@ -110,9 +110,9 @@ pub fn linear_srgb_to_oklab(c: LinSrgb) -> Oklab {
     let m = 0.2119035 * c.r + 0.6806995 * c.g + 0.10739696 * c.b;
     let s = 0.08830246 * c.r + 0.28171885 * c.g + 0.6299787 * c.b;
 
-    let l_ = (l).cbrt();
-    let m_ = (m).cbrt();
-    let s_ = (s).cbrt();
+    let l_ = l.cbrt();
+    let m_ = m.cbrt();
+    let s_ = s.cbrt();
 
     Oklab {
         l: 0.21045426 * l_ + 0.7936178 * m_ - 0.004072047 * s_,
@@ -716,9 +716,13 @@ pub fn okhsv_to_oklab(hsv: OkHsv) -> Oklab {
     let l_vt = toe_inv(l_v);
     let c_vt = c_v * l_vt / l_v;
 
-    let l_new = toe_inv(l);
-    let c = c * l_new / l;
-    let l = l_new;
+    let (l, c) = if l != 0.0 {
+        let l_new = toe_inv(l);
+        (l_new, c * l_new / l)
+    } else {
+        let l_new = toe_inv(l);
+        (l_new, c)
+    };
 
     let rgb_scale = oklab_to_linear_srgb(Oklab {
         l: l_vt,
@@ -753,8 +757,11 @@ pub fn oklab_to_oklch(lab: Oklab) -> OkLch {
 pub fn oklab_to_okhsv(lab: Oklab) -> OkHsv {
     let OkLch { l, c, h } = oklab_to_oklch(lab);
 
-    let a_ = lab.a / c;
-    let b_ = lab.b / c;
+    let (a_, b_) = if c == 0.0 {
+        (1.0, 0.0)
+    } else {
+        (lab.a / c, lab.b / c)
+    };
 
     let cusp = find_cusp(a_, b_);
     let st_max = to_st(cusp);
@@ -797,16 +804,20 @@ pub fn oklab_to_okhsv(lab: Oklab) -> OkHsv {
 #[cfg(test)]
 mod test {
     use super::*;
-    use rand::Rng;
+    use rand::{Rng, SeedableRng};
 
     fn equal_lin_srgb(a: LinSrgb, b: LinSrgb) -> bool {
         let eps = 5e-6;
         (a.r - b.r).abs() < eps && (a.g - b.g).abs() < eps && (a.b - b.b).abs() < eps
     }
 
+    fn seeded_rng() -> impl Rng {
+        rand::rngs::StdRng::seed_from_u64(8947) // just a random seed
+    }
+
     #[test]
     fn srgb_conversions() {
-        let mut rng = rand::thread_rng();
+        let mut rng = seeded_rng();
         for _ in 0..100 {
             let x = LinSrgb {
                 r: rng.gen(),
@@ -821,7 +832,7 @@ mod test {
 
     #[test]
     fn okhsl_conversions() {
-        let mut rng = rand::thread_rng();
+        let mut rng = seeded_rng();
         for _ in 0..100 {
             let x = Srgb {
                 r: rng.gen(),
@@ -841,7 +852,7 @@ mod test {
 
     #[test]
     fn okhsv_conversions() {
-        let mut rng = rand::thread_rng();
+        let mut rng = seeded_rng();
         for _ in 0..100 {
             let x = Srgb {
                 r: rng.gen(),
@@ -861,7 +872,7 @@ mod test {
 
     #[test]
     fn oklab_conversions() {
-        let mut rng = rand::thread_rng();
+        let mut rng = seeded_rng();
         for _ in 0..100 {
             let x = LinSrgb {
                 r: rng.gen(),
@@ -876,7 +887,7 @@ mod test {
 
     #[test]
     fn oklch_conversions() {
-        let mut rng = rand::thread_rng();
+        let mut rng = seeded_rng();
         for _ in 0..100 {
             let x = Oklab {
                 l: rng.gen(),
@@ -893,5 +904,89 @@ mod test {
                 z
             );
         }
+    }
+
+    #[test]
+    fn hsv_to_lch() {
+        let mut rng = seeded_rng();
+        for _ in 0..100 {
+            let x = OkHsv {
+                h: rng.gen(),
+                s: rng.gen(),
+                v: rng.gen(),
+            };
+
+            let y = ok_color::okhsv_to_oklab(x);
+            let z = ok_color::oklab_to_okhsv(y);
+
+            assert!(
+                equal_lin_srgb(LinSrgb::from(x), LinSrgb::from(z)),
+                "{:?} {:?}",
+                x,
+                z
+            );
+        }
+    }
+
+    #[test]
+    fn hsv_to_lch_only_value() {
+        let mut rng = seeded_rng();
+        for _ in 0..100 {
+            let x = OkHsv {
+                h: 0.0,
+                s: 0.0,
+                v: rng.gen(),
+            };
+
+            let y = ok_color::okhsv_to_oklab(x);
+            let z = ok_color::oklab_to_okhsv(y);
+
+            assert!(
+                equal_lin_srgb(LinSrgb::from(x), LinSrgb::from(z)),
+                "{:?} {:?}",
+                x,
+                z
+            );
+        }
+    }
+
+    #[test]
+    fn hsv_value_zero() {
+        let okhsv = OkHsv {
+            h: 0.0,
+            s: 1.0,
+            v: 0.0,
+        };
+
+        let oklab = ok_color::okhsv_to_oklab(okhsv);
+
+        println!("{:?}", okhsv);
+        println!("{:?}", oklab);
+
+        assert!(!oklab.l.is_nan());
+        assert!(!oklab.a.is_nan());
+        assert!(!oklab.b.is_nan());
+
+        assert_eq!(oklab.l, 0.0);
+        assert_eq!(oklab.a, 0.0);
+        assert_eq!(oklab.b, 0.0);
+    }
+
+    #[test]
+    fn hsv_saturation_zero() {
+        let oklch = OkLch {
+            l: 0.77861947,
+            c: 0.0,
+            h: 0.0,
+        };
+
+        let okhsv = OkHsv::from(oklch);
+
+        println!("{:?}", oklch);
+        println!("{:?}", okhsv);
+
+        assert!(!okhsv.h.is_nan());
+        assert!(!okhsv.s.is_nan());
+        assert!(!okhsv.v.is_nan());
     }
 }
