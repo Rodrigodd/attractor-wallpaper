@@ -482,18 +482,18 @@ pub fn get_base_intensity(attractor: &Attractor) -> i16 {
         thumbnail.swap(i, count);
     }
 
-    ascii_histogram(
-        "thumbnail intensity",
-        &thumbnail.map(|x| x as f64),
-        10.0,
-        false,
-    );
-    ascii_histogram(
-        "thumbnail non-zero intensity",
-        &thumbnail.map(|x| x as f64)[0..count],
-        10.0,
-        false,
-    );
+    // ascii_histogram(
+    //     "thumbnail intensity",
+    //     &thumbnail.map(|x| x as f64),
+    //     10.0,
+    //     false,
+    // );
+    // ascii_histogram(
+    //     "thumbnail non-zero intensity",
+    //     &thumbnail.map(|x| x as f64)[0..count],
+    //     10.0,
+    //     false,
+    // );
 
     let m = select_nth(&mut thumbnail[0..count], count * 3 / 4);
 
