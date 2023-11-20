@@ -112,7 +112,7 @@ fn gradient(p: vec2<f32>) -> vec4<f32> {
 
     let dist = distance(p, p1);
 
-    let t = dist / radius;
+    let t = dot(p - p1, p2 - p1) / (radius * radius);
 
     return okmix(c1, c2, t);
 }

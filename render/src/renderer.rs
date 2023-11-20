@@ -286,7 +286,7 @@ impl AttractorRenderer {
             _padding: [0; 8],
             bg_color_1: [0.012, 0.0, 0.0, 1.0],
             bg_color_2: [0.004, 0.0, 0.0, 1.0],
-            bg_point_1: [0.9, 0.3],
+            bg_point_1: [1.0, 0.0],
             bg_point_2: [0.2, 1.0],
         };
 
