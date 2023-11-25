@@ -5,7 +5,7 @@ use std::{
 };
 
 use attractors::{Affine, AntiAliasing, Attractor};
-use egui::{Checkbox, ComboBox, Grid, Response, Slider, TextEdit, Ui};
+use egui::{Checkbox, ComboBox, Response, Slider, TextEdit, Ui, Vec2, WidgetText};
 use egui_wgpu::wgpu;
 use egui_winit::winit::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -14,12 +14,14 @@ use egui_winit::winit::{
     platform::wayland::WindowBuilderExtWayland,
     window::{Window, WindowBuilder},
 };
-use oklab::{LinSrgb, OkLch};
+use oklab::{LinSrgb, OkLch, Oklab, Srgb};
 use rand::prelude::*;
 
 use render::{AttractorRenderer, SurfaceState, TaskId, WgpuState, WinitExecutor};
 
 use crate::widgets::ok_picker::ToColor32;
+
+use self::widgets::gradient::Gradient;
 
 mod channel;
 pub mod widgets;
@@ -269,6 +271,7 @@ struct GuiState {
     wallpaper_thread: Option<JoinHandle<AttractorCtx>>,
     background_color_1: OkLch,
     background_color_2: OkLch,
+    gradient: Gradient<Oklab>,
 }
 impl GuiState {
     fn set_seed(&mut self, seed: u64) {
@@ -332,6 +335,10 @@ fn main() {
         wallpaper_thread: None,
         background_color_1: OkLch::new(0.1, 1.0, 0.05),
         background_color_2: OkLch::new(0.05, 1.0, 0.05),
+        gradient: Gradient::new(vec![
+            (0.0, Srgb::new(1.0, 0.0, 0.0).into()),
+            (1.0, Srgb::new(0.0, 1.0, 0.0).into()),
+        ]),
     };
 
     // let mut attractor = AttractorCtx::new(&mut gui_state, size);
@@ -723,15 +730,15 @@ fn build_ui(
     render_state: &mut RenderState,
     executor: &mut WinitExecutor<UserEvent>,
 ) -> egui::InnerResponse<()> {
-    Grid::new("options_grid").show(ui, |ui| {
-        ui.label(format!(
-            "sample per second: {:.2e}",
-            total_samples as f64 / last_change.elapsed().as_secs_f64()
-        ));
-        ui.end_row();
+    ui.vertical(|ui| {
+        ui.my_field("samples per second:", |ui| {
+            ui.label(format!(
+                "{:.2e}",
+                total_samples as f64 / last_change.elapsed().as_secs_f64()
+            ));
+        });
 
-        ui.label("seed: ");
-        ui.horizontal(|ui| {
+        ui.my_field("seed:", |ui| {
             if ui.my_text_field(&mut gui_state.seed_text).lost_focus() {
                 if let Some(seed) = gui_state.seed() {
                     let _ = attractor_sender.send(AttractorMess::SetSeed(seed));
@@ -746,150 +753,147 @@ fn build_ui(
             }
         });
 
-        ui.end_row();
-
-        ui.label("multisampling: ");
-        if ui
-            .add(Slider::new(&mut gui_state.multisampling, 1..=6))
-            .changed()
-        {
-            let _ = attractor_sender.send(AttractorMess::SetMultisampling(gui_state.multisampling));
-            render_state.attractor_renderer.recreate_aggregate_buffer(
-                &render_state.wgpu_state.device,
-                render_state.attractor_renderer.size,
-                gui_state.multisampling,
-            );
-        }
-
-        ui.end_row();
-
-        ui.label("anti-aliasing: ");
-        let prev_anti_aliasing = gui_state.anti_aliasing;
-
-        ComboBox::new("anti-aliasing", "")
-            .selected_text(format!("{:?}", gui_state.anti_aliasing))
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut gui_state.anti_aliasing, AntiAliasing::None, "None");
-                ui.selectable_value(
-                    &mut gui_state.anti_aliasing,
-                    AntiAliasing::Bilinear,
-                    "Bilinear",
+        ui.my_field("multisampling:", |ui| {
+            if ui
+                .add(Slider::new(&mut gui_state.multisampling, 1..=6))
+                .changed()
+            {
+                let _ =
+                    attractor_sender.send(AttractorMess::SetMultisampling(gui_state.multisampling));
+                render_state.attractor_renderer.recreate_aggregate_buffer(
+                    &render_state.wgpu_state.device,
+                    render_state.attractor_renderer.size,
+                    gui_state.multisampling,
                 );
-                ui.selectable_value(
-                    &mut gui_state.anti_aliasing,
-                    AntiAliasing::Lanczos,
-                    "Lanczos",
-                );
-            });
-
-        if prev_anti_aliasing != gui_state.anti_aliasing {
-            let _ = attractor_sender.send(AttractorMess::SetAntialiasing(gui_state.anti_aliasing));
-        }
-
-        ui.end_row();
-
-        ui.label("intensity: ");
-        if ui
-            .add(Slider::new(&mut gui_state.intensity, 0.01..=4.0))
-            .changed()
-        {
-            let _ = attractor_sender.send(AttractorMess::SetIntensity(gui_state.intensity));
-        }
-
-        ui.end_row();
-
-        ui.label("random start: ");
-        if ui
-            .add(Checkbox::new(&mut gui_state.random_start, ""))
-            .changed()
-        {
-            let _ = attractor_sender.send(AttractorMess::SetRandomStart(gui_state.random_start));
-        }
-
-        ui.end_row();
-
-        ui.label("multithreading: ");
-        let prev_multihreaded = gui_state.multithreaded;
-
-        ComboBox::new("multithreading", "")
-            .selected_text(format!("{:?}", gui_state.multithreaded))
-            .show_ui(ui, |ui| {
-                ui.selectable_value(
-                    &mut gui_state.multithreaded,
-                    Multithreading::Single,
-                    "Single",
-                );
-                ui.selectable_value(
-                    &mut gui_state.multithreaded,
-                    Multithreading::AtomicMulti,
-                    "AtomicMulti",
-                );
-                ui.selectable_value(
-                    &mut gui_state.multithreaded,
-                    Multithreading::MergeMulti,
-                    "MergeMulti",
-                );
-            });
-
-        if prev_multihreaded != gui_state.multithreaded {
-            let _ = attractor_sender.send(AttractorMess::SetMultithreaded(gui_state.multithreaded));
-        }
-
-        ui.end_row();
-
-        ui.label("samples per iteration: ");
-        if ui
-            .text_edit_singleline(&mut gui_state.samples_per_iteration_text)
-            .lost_focus()
-        {
-            if let Some(samples_per_iteration) = gui_state.samples_per_iteration() {
-                let _ = attractor_sender
-                    .send(AttractorMess::SetSamplesPerIteration(samples_per_iteration));
             }
-        }
+        });
+
+        ui.my_field("anti-aliasing:", |ui| {
+            let prev_anti_aliasing = gui_state.anti_aliasing;
+
+            ComboBox::new("anti-aliasing", "")
+                .selected_text(format!("{:?}", gui_state.anti_aliasing))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut gui_state.anti_aliasing, AntiAliasing::None, "None");
+                    ui.selectable_value(
+                        &mut gui_state.anti_aliasing,
+                        AntiAliasing::Bilinear,
+                        "Bilinear",
+                    );
+                    ui.selectable_value(
+                        &mut gui_state.anti_aliasing,
+                        AntiAliasing::Lanczos,
+                        "Lanczos",
+                    );
+                });
+
+            if prev_anti_aliasing != gui_state.anti_aliasing {
+                let _ =
+                    attractor_sender.send(AttractorMess::SetAntialiasing(gui_state.anti_aliasing));
+            }
+        });
+
+        ui.my_field("intensity:", |ui| {
+            if ui
+                .add(Slider::new(&mut gui_state.intensity, 0.01..=4.0))
+                .changed()
+            {
+                let _ = attractor_sender.send(AttractorMess::SetIntensity(gui_state.intensity));
+            }
+        });
 
         ui.end_row();
+
+        ui.my_field("random start:", |ui| {
+            if ui
+                .add(Checkbox::new(&mut gui_state.random_start, ""))
+                .changed()
+            {
+                let _ =
+                    attractor_sender.send(AttractorMess::SetRandomStart(gui_state.random_start));
+            }
+        });
+
+        ui.my_field("multithreading:", |ui| {
+            let prev_multihreaded = gui_state.multithreaded;
+
+            ComboBox::new("multithreading", "")
+                .selected_text(format!("{:?}", gui_state.multithreaded))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut gui_state.multithreaded,
+                        Multithreading::Single,
+                        "Single",
+                    );
+                    ui.selectable_value(
+                        &mut gui_state.multithreaded,
+                        Multithreading::AtomicMulti,
+                        "AtomicMulti",
+                    );
+                    ui.selectable_value(
+                        &mut gui_state.multithreaded,
+                        Multithreading::MergeMulti,
+                        "MergeMulti",
+                    );
+                });
+
+            if prev_multihreaded != gui_state.multithreaded {
+                let _ =
+                    attractor_sender.send(AttractorMess::SetMultithreaded(gui_state.multithreaded));
+            }
+        });
+
+        ui.my_field("samples per iteration:", |ui| {
+            if ui
+                .my_text_field(&mut gui_state.samples_per_iteration_text)
+                .lost_focus()
+            {
+                if let Some(samples_per_iteration) = gui_state.samples_per_iteration() {
+                    let _ = attractor_sender
+                        .send(AttractorMess::SetSamplesPerIteration(samples_per_iteration));
+                }
+            }
+        });
 
         ui.separator();
 
-        ui.end_row();
+        ui.my_field("background color 1:", |ui| {
+            if ui
+                .my_color_picker(&mut gui_state.background_color_1)
+                .changed()
+            {
+                let c1 = LinSrgb::from(gui_state.background_color_1).clip();
+                let c2 = LinSrgb::from(gui_state.background_color_2).clip();
+                render_state.attractor_renderer.set_background_color(
+                    &render_state.wgpu_state.queue,
+                    [c1.r, c1.g, c1.b, 1.0],
+                    [c2.r, c2.g, c2.b, 1.0],
+                );
+            }
+        });
 
-        ui.label("total samples: ");
+        ui.my_field("background color 2:", |ui| {
+            if ui
+                .my_color_picker(&mut gui_state.background_color_2)
+                .changed()
+            {
+                let c1 = LinSrgb::from(gui_state.background_color_1).clip();
+                let c2 = LinSrgb::from(gui_state.background_color_2).clip();
+                render_state.attractor_renderer.set_background_color(
+                    &render_state.wgpu_state.queue,
+                    [c1.r, c1.g, c1.b, 1.0],
+                    [c2.r, c2.g, c2.b, 1.0],
+                );
+            }
+        });
 
-        ui.text_edit_singleline(&mut gui_state.total_samples_text);
+        ui.my_gradient_picker(&mut gui_state.gradient);
 
-        ui.end_row();
+        ui.separator();
 
-        ui.label("background color 1: ");
-
-        if ui
-            .my_color_picker(&mut gui_state.background_color_1)
-            .changed()
-        {
-            let c1 = LinSrgb::from(gui_state.background_color_1).clip();
-            let c2 = LinSrgb::from(gui_state.background_color_2).clip();
-            render_state.attractor_renderer.set_background_color(
-                &render_state.wgpu_state.queue,
-                [c1.r, c1.g, c1.b, 1.0],
-                [c2.r, c2.g, c2.b, 1.0],
-            );
-        }
-        ui.end_row();
-
-        ui.label("background color 2: ");
-        if ui
-            .my_color_picker(&mut gui_state.background_color_2)
-            .changed()
-        {
-            let c1 = LinSrgb::from(gui_state.background_color_1).clip();
-            let c2 = LinSrgb::from(gui_state.background_color_2).clip();
-            render_state.attractor_renderer.set_background_color(
-                &render_state.wgpu_state.queue,
-                [c1.r, c1.g, c1.b, 1.0],
-                [c2.r, c2.g, c2.b, 1.0],
-            );
-        }
-        ui.end_row();
+        ui.my_field("total samples:", |ui| {
+            ui.my_text_field(&mut gui_state.total_samples_text);
+        });
 
         if gui_state.wallpaper_thread.is_some() {
             ui.spinner();
@@ -985,8 +989,6 @@ fn build_ui(
             };
             executor.spawn(task);
         }
-
-        ui.end_row();
     })
 }
 
@@ -1055,54 +1057,73 @@ fn render_frame(
 trait MyUiExt {
     fn my_text_field(&mut self, text: &mut String) -> Response;
     fn my_color_picker(&mut self, oklch: &mut OkLch) -> Response;
+    fn my_gradient_picker(&mut self, gradient: &mut Gradient<Oklab>) -> bool;
+
+    /// A label with a fixed width, horizontally followed by a widget.
+    fn my_field<T>(
+        &mut self,
+        label: impl Into<WidgetText>,
+        content: impl FnOnce(&mut Ui) -> T,
+    ) -> T;
 }
 
 impl MyUiExt for Ui {
     fn my_text_field(&mut self, text: &mut String) -> Response {
-        self.add_sized([180.0, self.available_height()], TextEdit::singleline(text))
+        self.add_sized([120.0, self.available_height()], TextEdit::singleline(text))
     }
 
     fn my_color_picker(&mut self, oklch: &mut OkLch) -> Response {
         let ui = self;
 
-        let popup_id = ui.auto_id_with("popup");
-        let open = ui.memory(|mem| mem.is_popup_open(popup_id));
-        let mut button_response = color_button(ui, oklch.to_color32(), open);
-        if ui.style().explanation_tooltips {
-            button_response = button_response.on_hover_text("Click to edit color");
-        }
+        popup_button(
+            ui,
+            oklch,
+            |ui, oklch, open| color_button(ui, oklch.to_color32(), open),
+            |ui, oklch, response| {
+                if widgets::ok_picker::okhsv::color_picker_2d(ui, oklch) {
+                    response.mark_changed();
+                }
+            },
+        )
+    }
 
-        if button_response.clicked() {
-            ui.memory_mut(|mem| mem.toggle_popup(popup_id));
-        }
+    fn my_gradient_picker(&mut self, gradient: &mut Gradient<Oklab>) -> bool {
+        let ui = self;
 
-        const COLOR_SLIDER_WIDTH: f32 = 100.0;
+        widgets::gradient::gradient_editor(ui, gradient)
+    }
 
-        // TODO(emilk): make it easier to show a temporary popup that closes when you click outside it
-        if ui.memory(|mem| mem.is_popup_open(popup_id)) {
-            let area_response = egui::Area::new(popup_id)
-                .order(egui::Order::Foreground)
-                .fixed_pos(button_response.rect.max)
-                .constrain(true)
-                .show(ui.ctx(), |ui| {
-                    ui.spacing_mut().slider_width = COLOR_SLIDER_WIDTH;
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        if widgets::ok_picker::okhsv::color_picker_2d(ui, oklch) {
-                            button_response.mark_changed();
-                        }
-                    });
-                })
-                .response;
+    fn my_field<T>(
+        &mut self,
+        label: impl Into<WidgetText>,
+        content: impl FnOnce(&mut Ui) -> T,
+    ) -> T {
+        self.horizontal(|ui| {
+            const FIELD_WIDTH: f32 = 130.0;
 
-            if !button_response.clicked()
-                && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                    || area_response.clicked_elsewhere())
-            {
-                ui.memory_mut(|mem| mem.close_popup());
+            let total_size = ui.available_size();
+
+            ui.label(label);
+            let remaining_size = ui.available_size();
+
+            let label_width = total_size.x - remaining_size.x;
+            let pad_width = FIELD_WIDTH - label_width;
+
+            if pad_width > 0.0 {
+                ui.allocate_exact_size(
+                    Vec2 {
+                        x: pad_width,
+                        y: remaining_size.y,
+                    },
+                    egui::Sense::hover(),
+                );
+            } else {
+                println!("label_width: {}", label_width);
             }
-        }
 
-        button_response
+            ui.horizontal(content).inner
+        })
+        .inner
     }
 }
 
@@ -1127,4 +1148,45 @@ fn color_button(ui: &mut Ui, color: egui::Color32, open: bool) -> Response {
     }
 
     response
+}
+
+fn popup_button<T>(
+    ui: &mut Ui,
+    user_state: &mut T,
+    button: impl Fn(&mut Ui, &mut T, bool) -> Response,
+    mut widget: impl FnMut(&mut Ui, &mut T, &mut Response),
+) -> Response {
+    let popup_id = ui.auto_id_with("my_popup");
+    let open = ui.memory(|mem| mem.is_popup_open(popup_id));
+
+    let mut button_response = button(ui, user_state, open);
+    if ui.style().explanation_tooltips {
+        button_response = button_response.on_hover_text("Click to edit color");
+    }
+
+    if button_response.clicked() {
+        ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+    }
+
+    const POPUP_WIDTH: f32 = 100.0;
+    if ui.memory(|mem| mem.is_popup_open(popup_id)) {
+        let area_response = egui::Area::new(popup_id)
+            .order(egui::Order::Foreground)
+            .fixed_pos(button_response.rect.max)
+            .constrain(true)
+            .show(ui.ctx(), |ui| {
+                ui.spacing_mut().slider_width = POPUP_WIDTH;
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    widget(ui, user_state, &mut button_response);
+                });
+            })
+            .response;
+
+        if !button_response.clicked()
+            && (ui.input(|i| i.key_pressed(egui::Key::Escape)) || area_response.clicked_elsewhere())
+        {
+            ui.memory_mut(|mem| mem.close_popup());
+        }
+    }
+    button_response
 }
