@@ -6,6 +6,8 @@
 //! as the same ammount of difference in color. Useful for picking colors, building palettes and
 //! rendering gradients.
 
+use std::ops::{Add, Mul};
+
 pub mod ok_color;
 
 /// Represents a color in the sRGB color space.
@@ -369,6 +371,130 @@ impl From<OkHsl> for OkHsv {
     fn from(okhsl: OkHsl) -> Self {
         let srgb = ok_color::okhsl_to_srgb(okhsl);
         ok_color::srgb_to_okhsv(srgb)
+    }
+}
+
+// Linear operations
+
+impl Add for Srgb {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Srgb {
+            r: self.r + rhs.r,
+            g: self.g + rhs.g,
+            b: self.b + rhs.b,
+        }
+    }
+}
+impl Add for LinSrgb {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        LinSrgb {
+            r: self.r + rhs.r,
+            g: self.g + rhs.g,
+            b: self.b + rhs.b,
+        }
+    }
+}
+impl Add for Oklab {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        Oklab {
+            l: self.l + rhs.l,
+            a: self.a + rhs.a,
+            b: self.b + rhs.b,
+        }
+    }
+}
+impl Add for OkLch {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        OkLch {
+            l: self.l + rhs.l,
+            c: self.c + rhs.c,
+            h: self.h + rhs.h,
+        }
+    }
+}
+impl Add for OkHsl {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        OkHsl {
+            h: self.h + rhs.h,
+            s: self.s + rhs.s,
+            l: self.l + rhs.l,
+        }
+    }
+}
+impl Add for OkHsv {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        OkHsv {
+            h: self.h + rhs.h,
+            s: self.s + rhs.s,
+            v: self.v + rhs.v,
+        }
+    }
+}
+
+impl Mul<f32> for Srgb {
+    type Output = Self;
+    fn mul(self, rhs: f32) -> Self::Output {
+        Srgb {
+            r: self.r * rhs,
+            g: self.g * rhs,
+            b: self.b * rhs,
+        }
+    }
+}
+impl Mul<f32> for LinSrgb {
+    type Output = Self;
+    fn mul(self, rhs: f32) -> Self::Output {
+        LinSrgb {
+            r: self.r * rhs,
+            g: self.g * rhs,
+            b: self.b * rhs,
+        }
+    }
+}
+impl Mul<f32> for Oklab {
+    type Output = Self;
+    fn mul(self, rhs: f32) -> Self::Output {
+        Oklab {
+            l: self.l * rhs,
+            a: self.a * rhs,
+            b: self.b * rhs,
+        }
+    }
+}
+impl Mul<f32> for OkLch {
+    type Output = Self;
+    fn mul(self, rhs: f32) -> Self::Output {
+        OkLch {
+            l: self.l * rhs,
+            c: self.c * rhs,
+            h: self.h,
+        }
+    }
+}
+impl Mul<f32> for OkHsl {
+    type Output = Self;
+    fn mul(self, rhs: f32) -> Self::Output {
+        OkHsl {
+            h: self.h,
+            s: self.s * rhs,
+            l: self.l * rhs,
+        }
+    }
+}
+impl Mul<f32> for OkHsv {
+    type Output = Self;
+    fn mul(self, rhs: f32) -> Self::Output {
+        OkHsv {
+            h: self.h,
+            s: self.s * rhs,
+            v: self.v * rhs,
+        }
     }
 }
 
