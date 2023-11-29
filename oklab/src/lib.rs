@@ -498,6 +498,70 @@ impl Mul<f32> for OkHsv {
     }
 }
 
+// Array conversions
+
+impl From<[f32; 3]> for Srgb {
+    fn from([r, g, b]: [f32; 3]) -> Self {
+        Srgb { r, g, b }
+    }
+}
+impl From<[f32; 3]> for LinSrgb {
+    fn from([r, g, b]: [f32; 3]) -> Self {
+        LinSrgb { r, g, b }
+    }
+}
+impl From<[f32; 3]> for Oklab {
+    fn from([l, a, b]: [f32; 3]) -> Self {
+        Oklab { l, a, b }
+    }
+}
+impl From<[f32; 3]> for OkLch {
+    fn from([l, c, h]: [f32; 3]) -> Self {
+        OkLch { l, c, h }
+    }
+}
+impl From<[f32; 3]> for OkHsl {
+    fn from([h, s, l]: [f32; 3]) -> Self {
+        OkHsl { h, s, l }
+    }
+}
+impl From<[f32; 3]> for OkHsv {
+    fn from([h, s, v]: [f32; 3]) -> Self {
+        OkHsv { h, s, v }
+    }
+}
+
+impl From<Srgb> for [f32; 3] {
+    fn from(Srgb { r, g, b }: Srgb) -> Self {
+        [r, g, b]
+    }
+}
+impl From<LinSrgb> for [f32; 3] {
+    fn from(LinSrgb { r, g, b }: LinSrgb) -> Self {
+        [r, g, b]
+    }
+}
+impl From<Oklab> for [f32; 3] {
+    fn from(Oklab { l, a, b }: Oklab) -> Self {
+        [l, a, b]
+    }
+}
+impl From<OkLch> for [f32; 3] {
+    fn from(OkLch { l, c, h }: OkLch) -> Self {
+        [l, c, h]
+    }
+}
+impl From<OkHsl> for [f32; 3] {
+    fn from(OkHsl { h, s, l }: OkHsl) -> Self {
+        [h, s, l]
+    }
+}
+impl From<OkHsv> for [f32; 3] {
+    fn from(OkHsv { h, s, v }: OkHsv) -> Self {
+        [h, s, v]
+    }
+}
+
 #[cfg(test)]
 mod test {
     use rand::Rng;

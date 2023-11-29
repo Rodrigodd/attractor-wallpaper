@@ -1,3 +1,5 @@
+#![allow(clippy::let_and_return)]
+
 use std::{
     sync::{atomic::AtomicI32, mpsc::Sender},
     thread::JoinHandle,
@@ -14,7 +16,7 @@ use egui_winit::winit::{
     platform::wayland::WindowBuilderExtWayland,
     window::{Window, WindowBuilder},
 };
-use oklab::{LinSrgb, OkLch, Oklab, Srgb};
+use oklab::{LinSrgb, OkLch, Oklab};
 use rand::prelude::*;
 
 use render::{AttractorRenderer, SurfaceState, TaskId, WgpuState, WinitExecutor};
@@ -336,8 +338,12 @@ fn main() {
         background_color_1: OkLch::new(0.1, 1.0, 0.05),
         background_color_2: OkLch::new(0.05, 1.0, 0.05),
         gradient: Gradient::new(vec![
-            (0.0, Srgb::new(1.0, 0.0, 0.0).into()),
-            (1.0, Srgb::new(0.0, 1.0, 0.0).into()),
+            (0.00, OkLch::new(0.00, 0.3, 29.0 / 360.0).into()),
+            // (0.01, OkLch::new(0.00, 0.3, 29.0 / 360.0).into()),
+            (0.50, OkLch::new(0.50, 0.3, 29.0 / 360.0).into()),
+            (0.75, OkLch::new(0.75, 0.3, 69.0 / 360.0).into()),
+            // (0.99, OkLch::new(1.00, 0.3, 110.0 / 360.0).into()),
+            (1.00, OkLch::new(1.00, 0.3, 110.0 / 360.0).into()),
         ]),
     };
 

@@ -7,3 +7,4 @@
 # Acknowledgements
 
 - [ok-picker](https://github.com/gagbo/ok-picker)
+- http://jbrd.github.io/2020/12/27/monotone-cubic-interpolation.html
