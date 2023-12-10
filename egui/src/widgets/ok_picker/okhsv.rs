@@ -72,8 +72,8 @@ fn color_picker_2d_impl(ui: &mut Ui, oklch: &mut OkLch) {
     color_slider_1d(ui, &mut hue, 0.0, 1.0, |hue| {
         OkHsv {
             h: hue,
-            s: 0.5,
-            v: 0.5,
+            s: 1.0,
+            v: 1.0,
         }
         .to_color32()
     })
