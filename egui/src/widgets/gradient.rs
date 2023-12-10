@@ -5,9 +5,11 @@ use egui::{
 use oklab::{Oklab, Srgb};
 
 use super::ok_picker::ToColor32;
+use crate::MyUiExt;
 
 const N: u32 = 256;
 
+#[derive(Debug)]
 pub struct Gradient<T> {
     colors: Vec<(f32, T)>,
 }
@@ -24,7 +26,7 @@ impl<T: std::ops::Mul<f32, Output = T> + std::ops::Add<Output = T>> Gradient<T> 
         let right_index = self
             .colors
             .iter()
-            .position(|x| x.0 > t)
+            .position(|x| t < x.0)
             .unwrap_or(self.colors.len());
 
         if right_index == 0 {
@@ -54,7 +56,7 @@ impl<T: std::ops::Mul<f32, Output = T> + std::ops::Add<Output = T>> Gradient<T> 
         let right_index = self
             .colors
             .iter()
-            .position(|x| x.0 > t)
+            .position(|x| t < x.0)
             .unwrap_or(self.colors.len());
 
         if right_index == 0 {
@@ -121,6 +123,58 @@ impl<T: std::ops::Mul<f32, Output = T> + std::ops::Add<Output = T>> Gradient<T> 
         p.into()
     }
 
+    pub fn monotonic_hermit_spline_coefs(&self) -> Vec<(f32, [f32; 4], [f32; 4], [f32; 4])>
+    where
+        T: Copy + Into<[f32; 3]> + From<[f32; 3]>,
+    {
+        let mut coefs = Vec::with_capacity(self.colors.len() - 1);
+        for i in 0..self.colors.len() - 1 {
+            let t0;
+            let p0: [f32; 3];
+            if i == 0 {
+                t0 = self.colors[0].0 - 1.0;
+                p0 = self.colors[0].1.into();
+            } else {
+                let i0 = i - 1;
+                t0 = self.colors[i0].0;
+                p0 = self.colors[i0].1.into();
+            }
+
+            let i1 = i;
+            let t1 = self.colors[i1].0;
+            let p1: [f32; 3] = self.colors[i1].1.into();
+
+            let i2 = i + 1;
+            let t2 = self.colors[i2].0;
+            let p2: [f32; 3] = self.colors[i2].1.into();
+
+            let t3;
+            let p3: [f32; 3];
+            if i == self.colors.len() - 2 {
+                t3 = self.colors[self.colors.len() - 1].0 + 1.0;
+                p3 = self.colors[self.colors.len() - 1].1.into();
+            } else {
+                let i3 = i + 2;
+                t3 = self.colors[i3].0;
+                p3 = self.colors[i3].1.into();
+            }
+
+            let mut p = [[0.0; 4]; 3];
+
+            for i in 0..3 {
+                p[i] = cubic_monotonic_heckbert_spline(
+                    (t0, p0[i]),
+                    (t1, p1[i]),
+                    (t2, p2[i]),
+                    (t3, p3[i]),
+                );
+            }
+
+            coefs.push((self.colors[i].0, p[0], p[1], p[2]));
+        }
+        coefs
+    }
+
     /// Sample the gradient at `t` using Catmull-Rom interpolation.
     pub fn catmull_rom_sample(&self, t: f32) -> T
     where
@@ -133,7 +187,7 @@ impl<T: std::ops::Mul<f32, Output = T> + std::ops::Add<Output = T>> Gradient<T> 
         let right_index = self
             .colors
             .iter()
-            .position(|x| x.0 > t)
+            .position(|x| t < x.0)
             .unwrap_or(self.colors.len());
 
         if right_index == 0 {
@@ -213,11 +267,6 @@ macro_rules! relative_eq {
     };
 }
 
-/// Monotone cubic interpolation of points (t1, y1) and (t1, y2) using x as the interpolation
-/// parameter (assumed to be [0..1]). In order to maintain C1 continuity, two neighbouring
-/// samples are required.
-///
-/// Reference: http://jbrd.github.io/2020/12/27/monotone-cubic-interpolation.html
 pub fn interpolate_cubic_monotonic_heckbert(
     t: f32,
     (t0, y0): (f32, f32),
@@ -225,8 +274,23 @@ pub fn interpolate_cubic_monotonic_heckbert(
     (t2, y2): (f32, f32),
     (t3, y3): (f32, f32),
 ) -> f32 {
+    let [a, b, c, d] = cubic_monotonic_heckbert_spline((t0, y0), (t1, y1), (t2, y2), (t3, y3));
+    let x = (t - t1) / (t2 - t1);
+    ((((a * x) + b) * x) + c) * x + d
+}
+
+/// Monotone cubic interpolation of points (t1, y1) and (t1, y2) using x as the interpolation
+/// parameter (assumed to be [0..1]). In order to maintain C1 continuity, two neighbouring
+/// samples are required.
+///
+/// Reference: http://jbrd.github.io/2020/12/27/monotone-cubic-interpolation.html
+pub fn cubic_monotonic_heckbert_spline(
+    (t0, y0): (f32, f32),
+    (t1, y1): (f32, f32),
+    (t2, y2): (f32, f32),
+    (t3, y3): (f32, f32),
+) -> [f32; 4] {
     // remap everything [t1, t2] to [0, 1]
-    let x = remap(t, t1..=t2, 0.0..=1.0);
     let t0 = remap(t0, t1..=t2, 0.0..=1.0);
     let t3 = remap(t3, t1..=t2, 0.0..=1.0);
     let t1 = 0.0;
@@ -271,17 +335,12 @@ pub fn interpolate_cubic_monotonic_heckbert(
     }
 
     // Evaluate the cubic hermite spline
-    let result =
-        (((((m_1 + m_2 - 2.0 * s_1) * x) + (3.0 * s_1 - 2.0 * m_1 - m_2)) * x) + m_1) * x + y1;
+    let a = m_1 + m_2 - 2.0 * s_1;
+    let b = 3.0 * s_1 - 2.0 * m_1 - m_2;
+    let c = m_1;
+    let d = y1;
 
-    // The values at the end points (y0 and y1) define an interval that the curve passes
-    // through. Since the curve between the end-points is now monotonic, all interpolated
-    // values between these end points should be inside this interval. However, floating
-    // point rounding error can still lead to values slightly outside this range.
-    // Guard against this by clamping the interpolated result to this interval...
-    let min = y1.min(y2);
-    let max = y1.max(y2);
-    result.min(max).max(min)
+    [a, b, c, d]
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -301,12 +360,15 @@ pub fn gradient_editor(ui: &mut Ui, gradient: &mut Gradient<Oklab>) -> bool {
     changed |= gradient_handles(ui, gradient, &mut editor).changed();
 
     let mut handle = gradient.colors[editor.selected];
-    let mut color = handle.1.to_color32();
     let mut t = handle.0;
 
     ui.horizontal(|ui| {
         ui.label("Color:");
-        changed |= ui.color_edit_button_srgba(&mut color).changed();
+        let mut color = handle.1.into();
+        if ui.my_color_picker(&mut color).changed() {
+            changed |= true;
+            handle.1 = color.into();
+        }
     });
 
     let fixed = is_fixed(editor.selected, gradient);
@@ -323,12 +385,14 @@ pub fn gradient_editor(ui: &mut Ui, gradient: &mut Gradient<Oklab>) -> bool {
             .changed();
     });
 
+    let color32 = handle.1.to_color32();
+
     if changed {
         handle.0 = t;
         handle.1 = Srgb::new(
-            color.r() as f32 / 255.0,
-            color.g() as f32 / 255.0,
-            color.b() as f32 / 255.0,
+            color32.r() as f32 / 255.0,
+            color32.g() as f32 / 255.0,
+            color32.b() as f32 / 255.0,
         )
         .into();
 

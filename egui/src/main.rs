@@ -338,12 +338,28 @@ fn main() {
         background_color_1: OkLch::new(0.1, 1.0, 0.05),
         background_color_2: OkLch::new(0.05, 1.0, 0.05),
         gradient: Gradient::new(vec![
-            (0.00, OkLch::new(0.00, 0.3, 29.0 / 360.0).into()),
+            (
+                0.00,
+                OkLch::new(0.01, 0.3, 29.0 / 360.0).to_srgb().clip().into(),
+            ),
             // (0.01, OkLch::new(0.00, 0.3, 29.0 / 360.0).into()),
-            (0.50, OkLch::new(0.50, 0.3, 29.0 / 360.0).into()),
-            (0.75, OkLch::new(0.75, 0.3, 69.0 / 360.0).into()),
+            (
+                0.25,
+                OkLch::new(0.25, 0.3, 29.0 / 360.0).to_srgb().clip().into(),
+            ),
+            (
+                0.50,
+                OkLch::new(0.50, 0.3, 29.0 / 360.0).to_srgb().clip().into(),
+            ),
+            (
+                0.75,
+                OkLch::new(0.75, 0.3, 69.0 / 360.0).to_srgb().clip().into(),
+            ),
             // (0.99, OkLch::new(1.00, 0.3, 110.0 / 360.0).into()),
-            (1.00, OkLch::new(1.00, 0.3, 110.0 / 360.0).into()),
+            (
+                1.00,
+                OkLch::new(1.00, 0.3, 110.0 / 360.0).to_srgb().clip().into(),
+            ),
         ]),
     };
 
@@ -409,6 +425,15 @@ fn main() {
                 attractor_renderer,
                 egui_renderer,
             ))) => {
+                attractor_renderer.set_colormap(
+                    &wgpu_state.queue,
+                    gui_state
+                        .gradient
+                        .monotonic_hermit_spline_coefs()
+                        .into_iter()
+                        .map(|x| x.into())
+                        .collect(),
+                );
                 render_state = Some(RenderState {
                     wgpu_state,
                     surface,
@@ -893,7 +918,17 @@ fn build_ui(
             }
         });
 
-        ui.my_gradient_picker(&mut gui_state.gradient);
+        if ui.my_gradient_picker(&mut gui_state.gradient) {
+            render_state.attractor_renderer.set_colormap(
+                &render_state.wgpu_state.queue,
+                gui_state
+                    .gradient
+                    .monotonic_hermit_spline_coefs()
+                    .into_iter()
+                    .map(|x| x.into())
+                    .collect(),
+            )
+        }
 
         ui.separator();
 
@@ -1058,6 +1093,19 @@ fn render_frame(
     drop(render_pass);
     queue.submit(std::iter::once(encoder.finish()));
     texture.present();
+}
+
+trait ToSrgb {
+    fn to_srgb(&self) -> oklab::Srgb;
+}
+impl<T> ToSrgb for T
+where
+    oklab::Srgb: std::convert::From<T>,
+    T: Copy,
+{
+    fn to_srgb(&self) -> oklab::Srgb {
+        oklab::Srgb::from(*self)
+    }
 }
 
 trait MyUiExt {

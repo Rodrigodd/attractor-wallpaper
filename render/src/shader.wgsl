@@ -24,6 +24,13 @@ fn vs_main(
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<storage, read> aggregate_buffer : array<i32>;
 
+struct ColorPoint {
+    time: f32,
+    l_coef: vec4<f32>,
+    a_coef: vec4<f32>,
+    b_coef: vec4<f32>,
+}
+
 struct Uniforms {
   screenWidth: u32,
   screenHeight: u32,
@@ -35,12 +42,16 @@ struct Uniforms {
   bg_point_1: vec2<f32>,
   /// background gradient point 2, in clip space
   bg_point_2: vec2<f32>,
+  /// color map
+  colormap: array<ColorPoint, 4>,
 };
 
 // MULTISAMPLING here is replaced by a custom preprocessor. This in the future
 // should be replaced by WGSL override constructs, which is not implemented in
 // naga. The code may also be relying in constant propagation, which is also
 // not implemented yet.
+// const MULTISAMPLING: u32 = 0u;
+// const LANCZOS_WIDTH: u32 = 0u;
 const multisampling: u32 = MULTISAMPLING;
 const lanczos_width: u32 = LANCZOS_WIDTH;
 const pi: f32 = 3.1415926535897932384626433832795;
@@ -83,7 +94,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 fn color(c: f32, p: vec2<f32>) -> vec4<f32> {
     let background = gradient(p);
-    let foreground = colormap(c);
+    // var background: vec4<f32>;
+    // if p.y < 0.5 {
+    //     background = sample_colormap(p.x);
+    // } else {
+    //     background = colormap(p.x);
+    // }
+
+    let foreground = sample_colormap(c);
 
     let alpha = clamp(c * 10.0, 0.0, 1.0);
     return mix(background, foreground, alpha);
@@ -123,6 +141,47 @@ fn colormap(x: f32) -> vec4<f32> {
     var b: f32 = clamp(4.0 * x - 3.0, 0.0, 1.0);
 
     return vec4<f32>(r, g, b, 1.0);
+}
+
+fn sample_colormap(t: f32) -> vec4<f32> {
+    // let length: u32 = arrayLength(uniforms.colormap.time);
+    let length: i32 = 4;
+    var right_index = length;
+    for (var i: i32 = 0; i < length; i = i + 1) {
+        if (t < uniforms.colormap[i].time) {
+            right_index = i;
+            break;
+        }
+    }
+    let left_index = right_index - 1;
+
+    let t0 = uniforms.colormap[left_index].time;
+
+    var t1: f32;
+    if (right_index == length) {
+        t1 = 1.0;
+    } else {
+        t1 = uniforms.colormap[right_index].time;
+    }
+
+    var x: f32 = (t - t0) / (t1 - t0);
+    x = clamp(x, 0.0, 1.0);
+
+    var p = vec3(
+        (((uniforms.colormap[left_index].l_coef[0] * x) + uniforms.colormap[left_index].l_coef[1]) * x + uniforms.colormap[left_index].l_coef[2]) * x + uniforms.colormap[left_index].l_coef[3],
+        (((uniforms.colormap[left_index].a_coef[0] * x) + uniforms.colormap[left_index].a_coef[1]) * x + uniforms.colormap[left_index].a_coef[2]) * x + uniforms.colormap[left_index].a_coef[3],
+        (((uniforms.colormap[left_index].b_coef[0] * x) + uniforms.colormap[left_index].b_coef[1]) * x + uniforms.colormap[left_index].b_coef[2]) * x + uniforms.colormap[left_index].b_coef[3],
+    );
+
+    return vec4(oklab_to_linear(p), 1.0);
+}
+
+fn remap(x: f32, a: f32, b: f32, c: f32, d: f32) -> f32 {
+    return c + (x - a) * (d - c) / (b - a);
+}
+
+fn relative_eq(a: f32, b: f32) -> bool {
+    return abs(a - b) <= 1.0e-6 * max(abs(a), abs(b));
 }
 
 // Linear to sRGB conversion function

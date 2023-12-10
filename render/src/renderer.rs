@@ -288,6 +288,7 @@ impl AttractorRenderer {
             bg_color_2: [0.004, 0.0, 0.0, 1.0],
             bg_point_1: [1.0, 0.0],
             bg_point_2: [0.2, 1.0],
+            color_map: Default::default(),
         };
 
         let uniforms_buffer = device.create_buffer_init(&BufferInitDescriptor {
@@ -465,11 +466,7 @@ impl AttractorRenderer {
         background_color_2: [f32; 4],
     ) {
         assert!({
-            let x = Uniforms {
-                screen_width: self.size.width,
-                screen_height: self.size.height,
-                ..Default::default()
-            };
+            let x = Uniforms::default();
             (&x as *const Uniforms as usize) == (&x.screen_width as *const u32 as usize)
                 && (&x as *const Uniforms as usize + 4) == (&x.screen_height as *const u32 as usize)
         });
@@ -478,6 +475,22 @@ impl AttractorRenderer {
             &self.uniforms_buffer,
             16,
             bytemuck::cast_slice(&[background_color_1, background_color_2]),
+        );
+    }
+
+    #[allow(clippy::ptr_eq)]
+    pub fn set_colormap(&self, queue: &Queue, colormap: Vec<ColorPoint>) {
+        assert!({
+            let x = Uniforms::default();
+            (&x as *const Uniforms as usize + 64) == (&x.color_map as *const _ as usize)
+        });
+
+        assert!(colormap.len() <= 4);
+
+        queue.write_buffer(
+            &self.uniforms_buffer,
+            64,
+            bytemuck::cast_slice(colormap.as_slice()),
         );
     }
 }
@@ -530,11 +543,33 @@ fn create_bind_group(
 struct Uniforms {
     screen_width: u32,
     screen_height: u32,
-    _padding: [u8; 8],
+    _padding: [u8; 8], // the next field is 16 bytes aligned
     bg_color_1: [f32; 4],
     bg_color_2: [f32; 4],
     bg_point_1: [f32; 2],
     bg_point_2: [f32; 2],
+    color_map: [ColorPoint; 4],
+}
+
+#[repr(C, align(16))]
+#[derive(Copy, Clone, Default, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ColorPoint {
+    time: f32,
+    _padding: [u8; 12], // the next field is 16 bytes aligned
+    l_coef: [f32; 4],
+    a_coef: [f32; 4],
+    b_coef: [f32; 4],
+}
+impl From<(f32, [f32; 4], [f32; 4], [f32; 4])> for ColorPoint {
+    fn from((time, l_coef, a_coef, b_coef): (f32, [f32; 4], [f32; 4], [f32; 4])) -> Self {
+        Self {
+            time,
+            _padding: [0; 12],
+            l_coef,
+            a_coef,
+            b_coef,
+        }
+    }
 }
 
 #[repr(C)]
@@ -580,10 +615,7 @@ fn convolution_code(kernel: &[f32], multisampling: u8, side: usize) -> String {
                 format!("+ {}u", dj)
             };
 
-            let v = format!(
-                "aggregate_buffer[i0 {} * uniforms.screenWidth {}]\n",
-                dj, di
-            );
+            let v = format!("aggregate_buffer[i0 {} * uniforms.screenWidth {}]", dj, di);
             let c = format!(
                 "c += color(f32({}) / f32(aggregate_buffer[0]), p) * {:?};\n",
                 v, k
