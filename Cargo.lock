@@ -211,6 +211,7 @@ dependencies = [
  "egui_extras",
  "image",
  "oklab",
+ "parking_lot",
  "rand",
  "render",
  "wallpaper",

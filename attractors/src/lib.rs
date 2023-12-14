@@ -340,6 +340,27 @@ pub fn affine_from_pca(points: &[Point]) -> Affine {
     (mat, t)
 }
 
+/// Returns the affine transformation equivalent to applying `a` and then `b`.
+pub fn affine_affine(a: Affine, b: Affine) -> Affine {
+    // C*x + c = B*(A*x + a) + b
+    //    =>   = B*A*x + B*a + b
+    //    => C = B*A
+    //       c = B*a + b
+
+    let ([a00, a01, a10, a11], [a20, a21]) = a;
+    let ([b00, b01, b10, b11], [b20, b21]) = b;
+
+    let c00 = b00 * a00 + b01 * a10;
+    let c01 = b00 * a01 + b01 * a11;
+    let c10 = b10 * a00 + b11 * a10;
+    let c11 = b10 * a01 + b11 * a11;
+
+    let c20 = b00 * a20 + b01 * a21 + b20;
+    let c21 = b10 * a20 + b11 * a21 + b21;
+
+    ([c00, c01, c10, c11], [c20, c21])
+}
+
 #[allow(clippy::len_without_is_empty)]
 pub trait Buffer {
     type Element;
