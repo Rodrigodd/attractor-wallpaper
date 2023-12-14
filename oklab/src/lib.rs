@@ -19,6 +19,7 @@ pub mod ok_color;
 /// This can happen when converting from other color spaces, or when performing operations on
 /// colors. This can be fixed by calling the clip() function.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Srgb {
     /// Red component, with gamut in the range [0.0, 1.0].
     pub r: f32,
@@ -77,6 +78,7 @@ impl Srgb {
 /// This can happen when converting from other color spaces, or when performing operations on
 /// colors. This can be fixed by calling the clip() function.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LinSrgb {
     /// Red component, normally in the range [0.0, 1.0].
     pub r: f32,
@@ -115,6 +117,7 @@ impl LinSrgb {
 /// between two colors is perceived as the same amount of difference in lightness. This makes
 /// interpolations and gradients in this color space perceptually uniform.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Oklab {
     /// Perceived lightness.
     pub l: f32,
@@ -129,6 +132,7 @@ pub struct Oklab {
 /// This is a transformation of the Oklab color space, where the chromaticityies `a` and `b` are
 /// represented in polar coordinates, as chroma and hue.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OkLch {
     /// Perceived lightness.
     pub l: f32,
@@ -149,6 +153,7 @@ impl OkLch {
 /// This color space is similar to the HSV color space, but the with a perceptually uniform
 /// saturation and value, based on the Oklab/OkLCh color space.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OkHsv {
     /// Hue, as in the OkLCh color space, in the range [0.0, 1.0].
     pub h: f32,
@@ -159,6 +164,7 @@ pub struct OkHsv {
 }
 
 /// Represents a color in the sRGB color space, with 8 bits per channel.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Srgb8 {
     /// Red component, in the range [0, 255]
     pub r: u8,
@@ -183,6 +189,7 @@ impl From<Srgb> for Srgb8 {
 /// This color space is similar to the HSL color space, but the with a perceptually uniform
 /// saturation and lightness, based on the Oklab/OkLCh color space.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OkHsl {
     /// Hue, as in the OkLCh color space, in the range [0.0, 1.0]
     pub h: f32,

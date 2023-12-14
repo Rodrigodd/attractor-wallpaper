@@ -8,12 +8,15 @@ edition = "2021"
 [dependencies]
 egui = "0.23.0"
 egui-wgpu = "0.23.0"
-egui-winit = "0.23.0"
+egui-winit = { version = "0.23.0", features = ["serde"] }
+winit = { version = "0.28", features = ["serde"] }        # for serde
 render = { path = "../render" }
 attractors = { path = "../attractors" }
-oklab = { path = "../oklab" }
+oklab = { path = "../oklab", features = ["serde"] }
 rand = "0.8.5"
 egui_extras = "0.23.0"
 wallpaper = "3.2.0"
 image = "0.24.7"
 parking_lot = "0.12.1"
+serde = "1.0.193"
+serde_json = "1.0.108"

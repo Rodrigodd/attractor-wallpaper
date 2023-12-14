@@ -42,6 +42,7 @@ enum AttractorMess {
     SetSamplesPerIteration(u64),
     Resize(PhysicalSize<u32>),
     Transform(Affine),
+    Update,
 }
 
 async fn build_renderer(window: Window, proxy: EventLoopProxy<UserEvent>) {
@@ -84,7 +85,7 @@ struct RenderState {
     egui_renderer: egui_wgpu::Renderer,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 enum Multithreading {
     Single,
     AtomicMulti,
@@ -92,7 +93,7 @@ enum Multithreading {
 }
 
 /// Serializable configuration of the attractor
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct AttractorConfig {
     base_attractor: Attractor,
     base_intensity: i16,
@@ -183,6 +184,16 @@ impl AttractorCtx {
             last_change: Instant::now(),
             starts: Vec::new(),
         }
+    }
+
+    fn update(&mut self) {
+        self.bitmap = {
+            let config = self.config.lock();
+            let [width, height] = config.bitmap_size();
+            vec![0; width * height]
+        };
+        self.total_samples = 0;
+        self.last_change = Instant::now();
     }
 
     fn clear(&mut self) {
@@ -313,10 +324,6 @@ impl GuiState {
 
     fn seed(&mut self) -> Option<u64> {
         self.seed_text.parse::<u64>().ok()
-    }
-
-    fn multisampling(&mut self) -> u8 {
-        self.multisampling
     }
 
     fn samples_per_iteration(&mut self) -> Option<u64> {
@@ -469,6 +476,7 @@ fn main() {
                         attractor.resize(size, multisampling)
                     }
                     AttractorMess::Transform(affine) => attractor.transform(affine),
+                    AttractorMess::Update => attractor.update(),
                 },
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
                 _ => break,
@@ -1159,6 +1167,92 @@ fn build_ui(
             };
             executor.spawn(task);
         }
+
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            if ui.button("Save").clicked() {
+                let config = config.lock();
+
+                let j: Result<String, _> = serde_json::to_string(&*config);
+
+                drop(config);
+
+                match j {
+                    Err(e) => {
+                        println!("Error serializing: {e:?}")
+                    }
+                    Ok(x) => {
+                        std::fs::write("config.json", x).unwrap();
+                    }
+                }
+            }
+
+            if ui.button("load").clicked() {
+                'load: {
+                    let x = std::fs::read_to_string("config.json");
+                    let Ok(x) = x  else {
+                        println!("could not open config.json");
+                        break 'load;
+                    };
+
+                    let Ok(c) = serde_json::from_str::<AttractorConfig>(&x) else {
+                        println!("could not parse json");
+                        break 'load;
+                    };
+
+                    let mut config = config.lock();
+                    *config = c;
+
+                    // seed_text: String,
+                    // multisampling: u8,
+                    // anti_aliasing: AntiAliasing,
+                    // intensity: f32,
+                    // dragging: bool,
+                    // rotating: bool,
+                    // last_cursor_position: PhysicalPosition<f64>,
+                    // random_start: bool,
+                    // multithreaded: Multithreading,
+                    // samples_per_iteration_text: String,
+                    // total_samples_text: String,
+                    // wallpaper_thread: Option<JoinHandle<AttractorCtx>>,
+                    // background_color_1: OkLch,
+                    // background_color_2: OkLch,
+                    // gradient: Gradient<Oklab>,
+
+                    gui_state.seed_text = config.seed.to_string();
+                    gui_state.multisampling = config.multisampling;
+                    gui_state.anti_aliasing = config.anti_aliasing;
+                    gui_state.intensity = config.intensity;
+                    gui_state.random_start = config.random_start;
+                    gui_state.samples_per_iteration_text = config.samples_per_iteration.to_string();
+                    gui_state.multithreaded = config.multithreaded;
+                    gui_state.background_color_1 = config.background_color_1;
+                    gui_state.background_color_2 = config.background_color_2;
+                    gui_state.gradient.clone_from(&config.gradient);
+
+                    let c1 = LinSrgb::from(gui_state.background_color_1).clip();
+                    let c2 = LinSrgb::from(gui_state.background_color_2).clip();
+                    render_state.attractor_renderer.set_background_color(
+                        &render_state.wgpu_state.queue,
+                        [c1.r, c1.g, c1.b, 1.0],
+                        [c2.r, c2.g, c2.b, 1.0],
+                    );
+                    render_state.attractor_renderer.set_colormap(
+                        &render_state.wgpu_state.queue,
+                        gui_state
+                            .gradient
+                            .monotonic_hermit_spline_coefs()
+                            .into_iter()
+                            .map(|x| x.into())
+                            .collect(),
+                    );
+
+                    drop(config);
+                    let _ = attractor_sender.send(AttractorMess::Update);
+                }
+            }
+        });
     })
 }
 
