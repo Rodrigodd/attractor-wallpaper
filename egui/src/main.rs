@@ -85,8 +85,9 @@ struct RenderState {
     egui_renderer: egui_wgpu::Renderer,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
 enum Multithreading {
+    #[default]
     Single,
     AtomicMulti,
     MergeMulti,
@@ -98,7 +99,6 @@ struct AttractorConfig {
     base_attractor: Attractor,
     base_intensity: i16,
     transform: Affine,
-    attractor: Attractor,
     size: PhysicalSize<u32>,
 
     seed: u64,
@@ -118,7 +118,6 @@ impl Clone for AttractorConfig {
             base_attractor: self.base_attractor,
             base_intensity: self.base_intensity,
             transform: self.transform,
-            attractor: self.attractor,
             size: self.size,
             seed: self.seed,
             multisampling: self.multisampling,
@@ -137,7 +136,6 @@ impl Clone for AttractorConfig {
         self.base_attractor.clone_from(&source.base_attractor);
         self.base_intensity.clone_from(&source.base_intensity);
         self.transform.clone_from(&source.transform);
-        self.attractor.clone_from(&source.attractor);
         self.size.clone_from(&source.size);
         self.seed.clone_from(&source.seed);
         self.multisampling.clone_from(&source.multisampling);
@@ -165,6 +163,7 @@ impl AttractorConfig {
 #[derive(Clone)]
 struct AttractorCtx {
     config: Arc<Mutex<AttractorConfig>>,
+    attractor: Attractor,
     bitmap: Vec<i32>,
     total_samples: u64,
     last_change: Instant,
@@ -172,13 +171,17 @@ struct AttractorCtx {
 }
 impl AttractorCtx {
     fn new(config: Arc<Mutex<AttractorConfig>>) -> Self {
-        let bitmap = {
+        let bitmap;
+        let attractor;
+        {
             let config = config.lock();
             let [width, height] = config.bitmap_size();
-            vec![0; width * height]
+            bitmap = vec![0; width * height];
+            attractor = config.base_attractor.transform_input(config.transform);
         };
         Self {
             config,
+            attractor,
             bitmap,
             total_samples: 0,
             last_change: Instant::now(),
@@ -194,6 +197,11 @@ impl AttractorCtx {
         };
         self.total_samples = 0;
         self.last_change = Instant::now();
+        self.attractor = {
+            let config = self.config.lock();
+            config.base_attractor.transform_input(config.transform)
+        };
+        self.starts.clear();
     }
 
     fn clear(&mut self) {
@@ -206,9 +214,10 @@ impl AttractorCtx {
         {
             let mut config = self.config.lock();
             config.transform = affine_affine(affine, config.transform);
-            config.attractor = config.base_attractor.transform_input(config.transform);
+            self.attractor = config.base_attractor.transform_input(config.transform);
         }
         self.clear();
+        self.starts.clear();
     }
 
     fn resize(&mut self, new_size: PhysicalSize<u32>, new_multisampling: u8) {
@@ -226,7 +235,7 @@ impl AttractorCtx {
             let affine = attractors::map_bounds_affine(dst, src);
 
             config.transform = affine_affine(affine, config.transform);
-            config.attractor = config.base_attractor.transform_input(config.transform);
+            self.attractor = config.base_attractor.transform_input(config.transform);
 
             self.bitmap = vec![0i32; new_size[0] * new_size[1]];
             self.total_samples = 0;
@@ -256,7 +265,9 @@ impl AttractorCtx {
 
             attractor = attractor.transform_input(affine);
             config.base_intensity = attractors::get_base_intensity(&attractor);
-            config.attractor = attractor;
+            config.base_attractor = attractor;
+            config.transform = ([1.0, 0.0, 0.0, 1.0], [0.0, 0.0]);
+            self.attractor = attractor.transform_input(config.transform);
         };
 
         self.clear();
@@ -300,6 +311,7 @@ fn square_bounds(width: f64, height: f64, border: f64) -> [f64; 4] {
     [start_x, start_x + size, start_y, start_y + size]
 }
 
+#[derive(Default)]
 struct GuiState {
     seed_text: String,
     multisampling: u8,
@@ -387,7 +399,6 @@ fn main() {
         base_intensity: attractors::get_base_intensity(&attractor),
         base_attractor: attractor,
         transform: ([1.0, 0.0, 0.0, 1.0], [0.0, 0.0]),
-        attractor,
         size,
         seed,
         multisampling,
@@ -425,22 +436,11 @@ fn main() {
     };
 
     let mut gui_state = GuiState {
-        seed_text: attractor_config.seed.to_string(),
-        multisampling: attractor_config.multisampling,
-        anti_aliasing: attractor_config.anti_aliasing,
-        intensity: attractor_config.intensity,
-        dragging: false,
-        rotating: false,
-        last_cursor_position: PhysicalPosition::default(),
-        random_start: attractor_config.random_start,
-        multithreaded: attractor_config.multithreaded,
-        samples_per_iteration_text: attractor_config.samples_per_iteration.to_string(),
         total_samples_text: 10_000_000.to_string(),
-        wallpaper_thread: None,
-        background_color_1: attractor_config.background_color_1,
-        background_color_2: attractor_config.background_color_2,
-        gradient: attractor_config.gradient.clone(),
+        ..GuiState::default()
     };
+
+    update_from_config(&mut gui_state, &attractor_config);
 
     let attractor_config = Arc::new(Mutex::new(attractor_config));
 
@@ -508,18 +508,10 @@ fn main() {
             Event::UserEvent(UserEvent::BuildRenderer((
                 wgpu_state,
                 surface,
-                attractor_renderer,
+                mut attractor_renderer,
                 egui_renderer,
             ))) => {
-                attractor_renderer.set_colormap(
-                    &wgpu_state.queue,
-                    gui_state
-                        .gradient
-                        .monotonic_hermit_spline_coefs()
-                        .into_iter()
-                        .map(|x| x.into())
-                        .collect(),
-                );
+                update_render_from_guistate(&mut gui_state, &mut attractor_renderer, &wgpu_state);
                 render_state = Some(RenderState {
                     wgpu_state,
                     surface,
@@ -728,25 +720,24 @@ fn main() {
 }
 
 fn aggregate_attractor(attractor: &mut AttractorCtx) {
-    let mut config = attractor.config.lock();
+    let config = attractor.config.lock();
 
     let samples = config.samples_per_iteration;
 
     if config.random_start {
-        config.attractor.start = config
+        attractor.attractor.start = attractor
             .attractor
             .get_random_start_point(&mut rand::thread_rng());
     }
 
     let [width, height] = config.bitmap_size();
     let anti_aliasing = config.anti_aliasing;
-    let mut att = config.attractor;
 
     // avoid holding the lock while doing the heavy computation
     drop(config);
 
     attractors::aggregate_to_bitmap(
-        &mut att,
+        &mut attractor.attractor,
         width,
         height,
         samples,
@@ -755,8 +746,6 @@ fn aggregate_attractor(attractor: &mut AttractorCtx) {
         &mut 0,
     );
     attractor.total_samples += samples;
-
-    attractor.config.lock().attractor = att;
 }
 
 fn atomic_par_aggregate_attractor(attractor: &mut AttractorCtx) {
@@ -771,12 +760,11 @@ fn atomic_par_aggregate_attractor(attractor: &mut AttractorCtx) {
         let mut rng = rand::thread_rng();
         attractor
             .starts
-            .push(config.attractor.get_random_start_point(&mut rng));
+            .push(attractor.attractor.get_random_start_point(&mut rng));
     }
 
     let [width, height] = config.bitmap_size();
     let anti_aliasing = config.anti_aliasing;
-    let att = config.attractor;
 
     // avoid holding the lock while doing the heavy computation
     drop(config);
@@ -788,7 +776,7 @@ fn atomic_par_aggregate_attractor(attractor: &mut AttractorCtx) {
         for start in attractor.starts.iter_mut() {
             attractor.total_samples += samples;
 
-            let mut att = att;
+            let mut att = attractor.attractor;
 
             let bitmap: &[AtomicI32] = &*bitmap;
 
@@ -821,12 +809,11 @@ fn merge_par_aggregate_attractor(attractor: &mut AttractorCtx) {
         let mut rng = rand::thread_rng();
         attractor
             .starts
-            .push(config.attractor.get_random_start_point(&mut rng));
+            .push(attractor.attractor.get_random_start_point(&mut rng));
     }
 
     let [width, height] = config.bitmap_size();
     let anti_aliasing = config.anti_aliasing;
-    let att = config.attractor;
 
     // avoid holding the lock while doing the heavy computation
     drop(config);
@@ -839,7 +826,7 @@ fn merge_par_aggregate_attractor(attractor: &mut AttractorCtx) {
         let mut bitmap = attractor.bitmap.as_mut_slice();
         for start in attractor.starts.iter_mut() {
             attractor.total_samples += samples;
-            let mut att = att;
+            let mut att = attractor.attractor;
 
             let b;
             (b, bitmap) = bitmap.split_at_mut(len);
@@ -1204,56 +1191,70 @@ fn build_ui(
                     let mut config = config.lock();
                     *config = c;
 
-                    // seed_text: String,
-                    // multisampling: u8,
-                    // anti_aliasing: AntiAliasing,
-                    // intensity: f32,
-                    // dragging: bool,
-                    // rotating: bool,
-                    // last_cursor_position: PhysicalPosition<f64>,
-                    // random_start: bool,
-                    // multithreaded: Multithreading,
-                    // samples_per_iteration_text: String,
-                    // total_samples_text: String,
-                    // wallpaper_thread: Option<JoinHandle<AttractorCtx>>,
-                    // background_color_1: OkLch,
-                    // background_color_2: OkLch,
-                    // gradient: Gradient<Oklab>,
+                    update_from_config(gui_state, &config);
 
-                    gui_state.seed_text = config.seed.to_string();
-                    gui_state.multisampling = config.multisampling;
-                    gui_state.anti_aliasing = config.anti_aliasing;
-                    gui_state.intensity = config.intensity;
-                    gui_state.random_start = config.random_start;
-                    gui_state.samples_per_iteration_text = config.samples_per_iteration.to_string();
-                    gui_state.multithreaded = config.multithreaded;
-                    gui_state.background_color_1 = config.background_color_1;
-                    gui_state.background_color_2 = config.background_color_2;
-                    gui_state.gradient.clone_from(&config.gradient);
-
-                    let c1 = LinSrgb::from(gui_state.background_color_1).clip();
-                    let c2 = LinSrgb::from(gui_state.background_color_2).clip();
-                    render_state.attractor_renderer.set_background_color(
-                        &render_state.wgpu_state.queue,
-                        [c1.r, c1.g, c1.b, 1.0],
-                        [c2.r, c2.g, c2.b, 1.0],
-                    );
-                    render_state.attractor_renderer.set_colormap(
-                        &render_state.wgpu_state.queue,
-                        gui_state
-                            .gradient
-                            .monotonic_hermit_spline_coefs()
-                            .into_iter()
-                            .map(|x| x.into())
-                            .collect(),
+                    update_render_from_guistate(
+                        gui_state,
+                        &mut render_state.attractor_renderer,
+                        &render_state.wgpu_state,
                     );
 
                     drop(config);
                     let _ = attractor_sender.send(AttractorMess::Update);
+                    let _ = attractor_sender.send(AttractorMess::Resize(
+                        render_state.surface.window().inner_size(),
+                    ));
+                    // Make sure we wait for the attractor to receive the messages. In the call
+                    // below the attractor may still not have received the messages, but in the
+                    // next one it will surely have. This avoids observing the attractor in a
+                    // invalid state when rendering.
+                    attractor_recv.recv(|_| {});
                 }
             }
         });
     })
+}
+
+fn update_render_from_guistate(
+    gui_state: &mut GuiState,
+    attractor_renderer: &mut AttractorRenderer,
+    wgpu_state: &WgpuState,
+) {
+    attractor_renderer.recreate_aggregate_buffer(
+        &wgpu_state.device,
+        attractor_renderer.size,
+        gui_state.multisampling,
+    );
+
+    let c1 = LinSrgb::from(gui_state.background_color_1).clip();
+    let c2 = LinSrgb::from(gui_state.background_color_2).clip();
+    attractor_renderer.set_background_color(
+        &wgpu_state.queue,
+        [c1.r, c1.g, c1.b, 1.0],
+        [c2.r, c2.g, c2.b, 1.0],
+    );
+    attractor_renderer.set_colormap(
+        &wgpu_state.queue,
+        gui_state
+            .gradient
+            .monotonic_hermit_spline_coefs()
+            .into_iter()
+            .map(|x| x.into())
+            .collect(),
+    );
+}
+
+fn update_from_config(gui_state: &mut GuiState, config: &AttractorConfig) {
+    gui_state.seed_text = config.seed.to_string();
+    gui_state.multisampling = config.multisampling;
+    gui_state.anti_aliasing = config.anti_aliasing;
+    gui_state.intensity = config.intensity;
+    gui_state.random_start = config.random_start;
+    gui_state.samples_per_iteration_text = config.samples_per_iteration.to_string();
+    gui_state.multithreaded = config.multithreaded;
+    gui_state.background_color_1 = config.background_color_1;
+    gui_state.background_color_2 = config.background_color_2;
+    gui_state.gradient.clone_from(&config.gradient);
 }
 
 fn render_frame(

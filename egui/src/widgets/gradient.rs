@@ -9,7 +9,7 @@ use crate::MyUiExt;
 
 const N: u32 = 256;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Gradient<T> {
     colors: Vec<(f32, T)>,
 }

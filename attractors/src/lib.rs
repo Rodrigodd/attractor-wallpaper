@@ -398,8 +398,9 @@ impl Buffer for &[AtomicI32] {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AntiAliasing {
+    #[default]
     None,
     Bilinear,
     Lanczos,
