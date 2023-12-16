@@ -126,6 +126,12 @@ pub struct Oklab {
     /// Blue-yellow component, normally around the range [-1.0, 1.0].
     pub b: f32,
 }
+impl Oklab {
+    /// Create a new color with the given lightness, green-red and blue-yellow components.
+    pub fn new(l: f32, a: f32, b: f32) -> Self {
+        Self { l, a, b }
+    }
+}
 
 /// Represents a color in the Oklch color space.
 ///

@@ -407,31 +407,14 @@ fn main() {
         random_start: false,
         multithreaded: Multithreading::Single,
         samples_per_iteration: SAMPLES_PER_ITERATION,
-        background_color_1: OkLch::new(0.1, 1.0, 0.05),
-        background_color_2: OkLch::new(0.05, 1.0, 0.05),
+        background_color_1: OkLch::new(0.27, 0.11, 0.07),
+        background_color_2: OkLch::new(0.10, 0.04, 0.07),
         gradient: Gradient::new(vec![
-            (
-                0.00,
-                OkLch::new(0.01, 0.3, 29.0 / 360.0).to_srgb().clip().into(),
-            ),
-            // (0.01, OkLch::new(0.00, 0.3, 29.0 / 360.0).into()),
-            (
-                0.25,
-                OkLch::new(0.25, 0.3, 29.0 / 360.0).to_srgb().clip().into(),
-            ),
-            (
-                0.50,
-                OkLch::new(0.50, 0.3, 29.0 / 360.0).to_srgb().clip().into(),
-            ),
-            (
-                0.75,
-                OkLch::new(0.75, 0.3, 69.0 / 360.0).to_srgb().clip().into(),
-            ),
-            // (0.99, OkLch::new(1.00, 0.3, 110.0 / 360.0).into()),
-            (
-                1.00,
-                OkLch::new(1.00, 0.3, 110.0 / 360.0).to_srgb().clip().into(),
-            ),
+            (0.00, Oklab::new(0.09, 0.02, 0.02)),
+            (0.03, Oklab::new(0.25, 0.09, 0.05)),
+            (0.30, Oklab::new(0.50, 0.18, 0.10)),
+            (0.75, Oklab::new(0.92, -0.05, 0.19)),
+            (1.00, Oklab::new(1.00, 0.00, 0.00)),
         ]),
     };
 
@@ -1161,7 +1144,7 @@ fn build_ui(
             if ui.button("Save").clicked() {
                 let config = config.lock();
 
-                let j: Result<String, _> = serde_json::to_string(&*config);
+                let j: Result<String, _> = serde_json::to_string_pretty(&*config);
 
                 drop(config);
 
