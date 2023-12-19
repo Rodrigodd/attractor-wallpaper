@@ -1,6 +1,7 @@
 #![allow(clippy::let_and_return)]
 
 use std::{
+    collections::BTreeMap,
     sync::{atomic::AtomicI32, mpsc::Sender, Arc},
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -93,6 +94,16 @@ enum Multithreading {
     MergeMulti,
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct Theme {
+    background_color_1: OkLch,
+    background_color_2: OkLch,
+    gradient: Gradient<Oklab>,
+}
+
+/// List of themes, keyed by name.
+type SavedThemes = BTreeMap<String, Theme>;
+
 /// Serializable configuration of the attractor
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct AttractorConfig {
@@ -110,6 +121,7 @@ struct AttractorConfig {
     samples_per_iteration: u64,
     background_color_1: OkLch,
     background_color_2: OkLch,
+    saved_themes: SavedThemes,
     gradient: Gradient<Oklab>,
 }
 impl Clone for AttractorConfig {
@@ -128,6 +140,7 @@ impl Clone for AttractorConfig {
             samples_per_iteration: self.samples_per_iteration,
             background_color_1: self.background_color_1,
             background_color_2: self.background_color_2,
+            saved_themes: self.saved_themes.clone(),
             gradient: self.gradient.clone(),
         }
     }
@@ -149,6 +162,7 @@ impl Clone for AttractorConfig {
             .clone_from(&source.background_color_1);
         self.background_color_2
             .clone_from(&source.background_color_2);
+        self.saved_themes.clone_from(&source.saved_themes);
         self.gradient.clone_from(&source.gradient);
     }
 }
@@ -327,6 +341,8 @@ struct GuiState {
     wallpaper_thread: Option<JoinHandle<AttractorCtx>>,
     background_color_1: OkLch,
     background_color_2: OkLch,
+    saved_themes: SavedThemes,
+    theme_name: String,
     gradient: Gradient<Oklab>,
 }
 impl GuiState {
@@ -409,6 +425,37 @@ fn main() {
         samples_per_iteration: SAMPLES_PER_ITERATION,
         background_color_1: OkLch::new(0.27, 0.11, 0.07),
         background_color_2: OkLch::new(0.10, 0.04, 0.07),
+        saved_themes: [
+            (
+                "Hotmap".to_string(),
+                Theme {
+                    background_color_1: OkLch::new(0.27, 0.11, 0.07),
+                    background_color_2: OkLch::new(0.10, 0.04, 0.07),
+                    gradient: Gradient::new(vec![
+                        (0.00, Oklab::new(0.09, 0.02, 0.02)),
+                        (0.03, Oklab::new(0.25, 0.09, 0.05)),
+                        (0.30, Oklab::new(0.50, 0.18, 0.10)),
+                        (0.75, Oklab::new(0.92, -0.05, 0.19)),
+                        (1.00, Oklab::new(1.00, 0.00, 0.00)),
+                    ]),
+                },
+            ),
+            (
+                "pamtoH".to_string(),
+                Theme {
+                    background_color_1: OkLch::new(0.10, 0.04, 0.07),
+                    background_color_2: OkLch::new(0.27, 0.11, 0.07),
+                    gradient: Gradient::new(vec![
+                        (0.00, Oklab::new(1.00, 0.00, 0.00)),
+                        (0.25, Oklab::new(0.92, -0.05, 0.19)),
+                        (0.70, Oklab::new(0.50, 0.18, 0.10)),
+                        (0.97, Oklab::new(0.25, 0.09, 0.05)),
+                        (1.00, Oklab::new(0.09, 0.02, 0.02)),
+                    ]),
+                },
+            ),
+        ]
+        .into(),
         gradient: Gradient::new(vec![
             (0.00, Oklab::new(0.09, 0.02, 0.02)),
             (0.03, Oklab::new(0.25, 0.09, 0.05)),
@@ -977,6 +1024,44 @@ fn build_ui(
 
         ui.separator();
 
+        ui.my_field("themes:", |ui| {
+            ComboBox::new("saved_themes", "")
+                .selected_text(gui_state.theme_name.clone())
+                .show_ui(ui, |ui| {
+                    let mut changed = false;
+                    for (name, theme) in gui_state.saved_themes.iter() {
+                        if ui
+                            .selectable_label(false, name)
+                            .on_hover_text("load gradient")
+                            .clicked()
+                        {
+                            gui_state.theme_name = name.clone();
+                            gui_state.background_color_1 = theme.background_color_1;
+                            gui_state.background_color_2 = theme.background_color_2;
+                            gui_state.gradient = theme.gradient.clone();
+                            changed = true;
+                        }
+                    }
+
+                    if changed {
+                        update_render_from_guistate(
+                            gui_state,
+                            &mut render_state.attractor_renderer,
+                            &render_state.wgpu_state,
+                        );
+                    }
+                });
+        });
+
+        ui.my_field("theme name:", |ui| {
+            if ui.my_text_field(&mut gui_state.theme_name).changed() {
+                config
+                    .lock()
+                    .saved_themes
+                    .clone_from(&gui_state.saved_themes);
+            }
+        });
+
         ui.my_field("background color 1:", |ui| {
             if ui
                 .my_color_picker(&mut gui_state.background_color_1)
@@ -1023,6 +1108,23 @@ fn build_ui(
                     .collect(),
             )
         }
+
+        ui.my_field("save theme:", |ui| {
+            if ui.button("save").clicked() {
+                gui_state.saved_themes.insert(
+                    gui_state.theme_name.clone(),
+                    Theme {
+                        background_color_1: gui_state.background_color_1,
+                        background_color_2: gui_state.background_color_2,
+                        gradient: gui_state.gradient.clone(),
+                    },
+                );
+                config
+                    .lock()
+                    .saved_themes
+                    .clone_from(&gui_state.saved_themes);
+            }
+        });
 
         ui.separator();
 
@@ -1237,6 +1339,7 @@ fn update_from_config(gui_state: &mut GuiState, config: &AttractorConfig) {
     gui_state.multithreaded = config.multithreaded;
     gui_state.background_color_1 = config.background_color_1;
     gui_state.background_color_2 = config.background_color_2;
+    gui_state.saved_themes = config.saved_themes.clone();
     gui_state.gradient.clone_from(&config.gradient);
 }
 
