@@ -277,10 +277,9 @@ impl AttractorCtx {
             let dst = square_bounds(width as f64, height as f64, BORDER);
             let affine = attractors::map_bounds_affine(dst, bounds);
 
-            attractor = attractor.transform_input(affine);
             config.base_intensity = attractors::get_base_intensity(&attractor);
             config.base_attractor = attractor;
-            config.transform = ([1.0, 0.0, 0.0, 1.0], [0.0, 0.0]);
+            config.transform = affine;
             self.attractor = attractor.transform_input(config.transform);
         };
 
@@ -390,7 +389,7 @@ fn main() {
 
     let seed = 8742;
     let multisampling = 1;
-    let attractor = {
+    let (attractor, transform) = {
         let rng = rand::rngs::SmallRng::seed_from_u64(seed);
         let mut attractor = Attractor::find_strange_attractor(rng, 1_000_000).unwrap();
         let points = attractor.get_points::<512>();
@@ -408,13 +407,13 @@ fn main() {
         let dst = square_bounds(width, height, BORDER);
         let affine = attractors::map_bounds_affine(dst, bounds);
 
-        attractor.transform_input(affine)
+        (attractor, affine)
     };
 
     let attractor_config = AttractorConfig {
         base_intensity: attractors::get_base_intensity(&attractor),
         base_attractor: attractor,
-        transform: ([1.0, 0.0, 0.0, 1.0], [0.0, 0.0]),
+        transform,
         size,
         seed,
         multisampling,
@@ -694,20 +693,14 @@ fn main() {
 
                     let base_intensity = config.base_intensity as f32 / config.intensity;
                     let total_samples = at.total_samples;
-                    let size = config.size;
-                    let multisampling = config.multisampling;
                     let anti_aliasing = config.anti_aliasing;
+                    let mat = config.transform.0;
 
                     // drop lock before doing any heavy computation
                     drop(config);
 
-                    at.bitmap[0] = render::get_intensity(
-                        base_intensity,
-                        total_samples,
-                        size,
-                        multisampling,
-                        anti_aliasing,
-                    );
+                    at.bitmap[0] =
+                        render::get_intensity(base_intensity, mat, total_samples, anti_aliasing);
                     render_state
                         .attractor_renderer
                         .load_aggragate_buffer(&render_state.wgpu_state.queue, &at.bitmap);
@@ -1209,6 +1202,7 @@ fn build_ui(
                 gradient,
                 background_color_1,
                 background_color_2,
+                transform: (mat, _),
                 ..
             } = config;
 
@@ -1222,13 +1216,8 @@ fn build_ui(
                 )
                 .unwrap();
 
-                bitmap[0] = render::get_intensity(
-                    base_intensity as f32,
-                    total_samples,
-                    size,
-                    multisampling,
-                    anti_aliasing,
-                );
+                bitmap[0] =
+                    render::get_intensity(base_intensity as f32, mat, total_samples, anti_aliasing);
                 attractor_renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
 
                 update_render(

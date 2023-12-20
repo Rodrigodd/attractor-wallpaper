@@ -173,9 +173,13 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
 
     bitmap[0] = get_intensity(
         base_intensity as f32,
+        [
+            (cli.multisampling as f64 * size.width as f64),
+            0.0,
+            0.0,
+            (cli.multisampling as f64 * size.height as f64),
+        ],
         total_samples,
-        size,
-        cli.multisampling,
         cli.anti_aliasing.into_attractors_antialiasing(),
     );
     renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
@@ -415,9 +419,13 @@ pub async fn run_windowed(cli: Cli) {
                 total_samples += samples;
                 bitmap[0] = get_intensity(
                     base_intensity as f32,
+                    [
+                        1.0 / (cli.multisampling as f64),
+                        0.0,
+                        0.0,
+                        1.0 / (cli.multisampling as f64),
+                    ],
                     total_samples,
-                    size,
-                    cli.multisampling,
                     cli.anti_aliasing.into_attractors_antialiasing(),
                 );
                 renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
@@ -455,9 +463,8 @@ pub async fn run_windowed(cli: Cli) {
 
 pub fn get_intensity(
     base_intensity: f32,
+    tranform: [f64; 4],
     total_samples: u64,
-    size: winit::dpi::PhysicalSize<u32>,
-    multisampling: u8,
     antialiasing: attractors::AntiAliasing,
 ) -> i32 {
     let p = match antialiasing {
@@ -466,11 +473,9 @@ pub fn get_intensity(
         attractors::AntiAliasing::Lanczos => 64,
     };
 
-    (base_intensity * total_samples as f32 * 2.0 * p as f32
-        / size.width as f32
-        / size.height as f32
-        / multisampling as f32
-        / multisampling as f32) as i32
+    let det = tranform[0] * tranform[3] - tranform[1] * tranform[2];
+
+    (base_intensity * total_samples as f32 * p as f32 * det as f32 / 4.0) as i32
 }
 
 fn square_bounds(width: f64, height: f64, border: f64) -> [f64; 4] {
