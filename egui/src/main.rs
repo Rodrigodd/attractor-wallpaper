@@ -759,6 +759,13 @@ fn main() {
 fn aggregate_attractor(attractor: &mut AttractorCtx) {
     let config = attractor.config.lock();
 
+    let [width, height] = config.bitmap_size();
+
+    // the config could have being modified in the meantime.
+    if width * height != attractor.bitmap.len() {
+        return;
+    }
+
     let samples = config.samples_per_iteration;
 
     if config.random_start {
@@ -767,7 +774,6 @@ fn aggregate_attractor(attractor: &mut AttractorCtx) {
             .get_random_start_point(&mut rand::thread_rng());
     }
 
-    let [width, height] = config.bitmap_size();
     let anti_aliasing = config.anti_aliasing;
 
     // avoid holding the lock while doing the heavy computation
