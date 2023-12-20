@@ -541,7 +541,14 @@ fn main() {
                 mut attractor_renderer,
                 egui_renderer,
             ))) => {
-                update_render_from_guistate(&mut gui_state, &mut attractor_renderer, &wgpu_state);
+                update_render(
+                    &mut attractor_renderer,
+                    &wgpu_state,
+                    &gui_state.gradient,
+                    gui_state.multisampling,
+                    gui_state.background_color_1,
+                    gui_state.background_color_2,
+                );
                 render_state = Some(RenderState {
                     wgpu_state,
                     surface,
@@ -1044,10 +1051,13 @@ fn build_ui(
                     }
 
                     if changed {
-                        update_render_from_guistate(
-                            gui_state,
+                        update_render(
                             &mut render_state.attractor_renderer,
                             &render_state.wgpu_state,
+                            &gui_state.gradient,
+                            gui_state.multisampling,
+                            gui_state.background_color_1,
+                            gui_state.background_color_2,
                         );
                     }
                 });
@@ -1190,6 +1200,9 @@ fn build_ui(
                 base_intensity,
                 multisampling,
                 anti_aliasing,
+                gradient,
+                background_color_1,
+                background_color_2,
                 ..
             } = config;
 
@@ -1211,6 +1224,15 @@ fn build_ui(
                     anti_aliasing,
                 );
                 attractor_renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
+
+                update_render(
+                    &mut attractor_renderer,
+                    &wgpu_state,
+                    &gradient,
+                    multisampling,
+                    background_color_1,
+                    background_color_2,
+                );
 
                 let texture = wgpu_state.new_target_texture(size);
                 let view = texture.create_view(&Default::default());
@@ -1268,9 +1290,12 @@ fn build_ui(
                         break 'load;
                     };
 
-                    let Ok(c) = serde_json::from_str::<AttractorConfig>(&x) else {
-                        println!("could not parse json");
-                        break 'load;
+                    let c = match serde_json::from_str::<AttractorConfig>(&x) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            println!("could not parse json: {}", e);
+                            break 'load;
+                        }
                     };
 
                     let mut config = config.lock();
@@ -1278,10 +1303,13 @@ fn build_ui(
 
                     update_from_config(gui_state, &config);
 
-                    update_render_from_guistate(
-                        gui_state,
+                    update_render(
                         &mut render_state.attractor_renderer,
                         &render_state.wgpu_state,
+                        &gui_state.gradient,
+                        gui_state.multisampling,
+                        gui_state.background_color_1,
+                        gui_state.background_color_2,
                     );
 
                     drop(config);
@@ -1300,19 +1328,22 @@ fn build_ui(
     })
 }
 
-fn update_render_from_guistate(
-    gui_state: &mut GuiState,
+fn update_render(
     attractor_renderer: &mut AttractorRenderer,
     wgpu_state: &WgpuState,
+    gradient: &Gradient<Oklab>,
+    multisampling: u8,
+    background_color_1: OkLch,
+    background_color_2: OkLch,
 ) {
     attractor_renderer.recreate_aggregate_buffer(
         &wgpu_state.device,
         attractor_renderer.size,
-        gui_state.multisampling,
+        multisampling,
     );
 
-    let c1 = LinSrgb::from(gui_state.background_color_1).clip();
-    let c2 = LinSrgb::from(gui_state.background_color_2).clip();
+    let c1 = LinSrgb::from(background_color_1).clip();
+    let c2 = LinSrgb::from(background_color_2).clip();
     attractor_renderer.set_background_color(
         &wgpu_state.queue,
         [c1.r, c1.g, c1.b, 1.0],
@@ -1320,8 +1351,7 @@ fn update_render_from_guistate(
     );
     attractor_renderer.set_colormap(
         &wgpu_state.queue,
-        gui_state
-            .gradient
+        gradient
             .monotonic_hermit_spline_coefs()
             .into_iter()
             .map(|x| x.into())
