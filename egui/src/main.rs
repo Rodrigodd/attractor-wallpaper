@@ -520,7 +520,13 @@ fn main() {
 
         let max_total_samples = {
             let mat = attractor.config.lock().transform.0;
-            10_000_000.0 * (1.0 / det(mat).abs()) / (500.0 * 500.0 / 4.0)
+
+            // `transform` maps from [-1, 1] to the image size, so we need to divide by 2x2 here.
+            let baseline_zoom = 500.0 * 500.0 / 4.0;
+            let zoom = 1.0 / det(mat).abs();
+
+            // for a 500x500 image, 10_000_000 samples is a good baseline
+            10_000_000.0 * zoom / baseline_zoom
         };
 
         if attractor.total_samples < max_total_samples as u64 {
