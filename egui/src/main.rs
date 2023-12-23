@@ -181,6 +181,7 @@ struct AttractorCtx {
     bitmap: Vec<i32>,
     total_samples: u64,
     last_change: Instant,
+    stop_time: Option<Instant>,
     starts: Vec<[f64; 2]>,
 }
 impl AttractorCtx {
@@ -199,6 +200,7 @@ impl AttractorCtx {
             bitmap,
             total_samples: 0,
             last_change: Instant::now(),
+            stop_time: None,
             starts: Vec::new(),
         }
     }
@@ -211,6 +213,7 @@ impl AttractorCtx {
         };
         self.total_samples = 0;
         self.last_change = Instant::now();
+        self.stop_time = None;
         self.attractor = {
             let config = self.config.lock();
             config.base_attractor.transform_input(config.transform)
@@ -222,6 +225,7 @@ impl AttractorCtx {
         self.bitmap.fill(0);
         self.total_samples = 0;
         self.last_change = Instant::now();
+        self.stop_time = None;
     }
 
     fn transform(&mut self, affine: Affine) {
@@ -512,11 +516,25 @@ fn main() {
             }
         }
 
-        let multithreading = attractor.config.lock().multithreaded;
-        match multithreading {
-            Multithreading::Single => aggregate_attractor(&mut attractor),
-            Multithreading::AtomicMulti => atomic_par_aggregate_attractor(&mut attractor),
-            Multithreading::MergeMulti => merge_par_aggregate_attractor(&mut attractor),
+        let det = |mat: [f64; 4]| mat[0] * mat[3] - mat[1] * mat[2];
+
+        let max_total_samples = {
+            let mat = attractor.config.lock().transform.0;
+            10_000_000.0 * (1.0 / det(mat).abs()) / (500.0 * 500.0 / 4.0)
+        };
+
+        if attractor.total_samples < max_total_samples as u64 {
+            let multithreading = attractor.config.lock().multithreaded;
+            match multithreading {
+                Multithreading::Single => aggregate_attractor(&mut attractor),
+                Multithreading::AtomicMulti => atomic_par_aggregate_attractor(&mut attractor),
+                Multithreading::MergeMulti => merge_par_aggregate_attractor(&mut attractor),
+            }
+        } else {
+            if attractor.stop_time.is_none() {
+                attractor.stop_time = Some(Instant::now());
+            }
+            std::thread::sleep(Duration::from_millis(5));
         }
 
         if sender_bitmap.is_closed() {
@@ -670,6 +688,7 @@ fn main() {
             }
             Event::MainEventsCleared => {
                 let mut total_sampĺes = 0;
+                let mut stop_time = Instant::now();
                 recv_bitmap.recv(|at| {
                     let rsize = render_state.attractor_renderer.size;
                     let rsize = [
@@ -707,6 +726,11 @@ fn main() {
 
                     total_sampĺes = at.total_samples;
                     last_change = at.last_change;
+                    if let Some(x) = at.stop_time {
+                        stop_time = x;
+                    } else {
+                        stop_time = Instant::now();
+                    }
                 });
 
                 let new_input = egui_state.take_egui_input(window);
@@ -722,7 +746,7 @@ fn main() {
                                 &mut recv_bitmap,
                                 &attractor_config,
                                 total_sampĺes,
-                                last_change,
+                                stop_time - last_change,
                                 render_state,
                                 &mut executor,
                             );
@@ -899,15 +923,17 @@ fn build_ui(
     attractor_recv: &mut channel::Receiver<AttractorCtx>,
     config: &Mutex<AttractorConfig>,
     total_samples: u64,
-    last_change: Instant,
+    elapsed_time: Duration,
     render_state: &mut RenderState,
     executor: &mut WinitExecutor<UserEvent>,
 ) -> egui::InnerResponse<()> {
     ui.vertical(|ui| {
         ui.my_field("samples per second:", |ui| {
             ui.label(format!(
-                "{:.2e}",
-                total_samples as f64 / last_change.elapsed().as_secs_f64()
+                "{:.2e} ({:.2e} samples in {:.2}s))",
+                total_samples as f64 / elapsed_time.as_secs_f64(),
+                total_samples,
+                elapsed_time.as_secs_f64()
             ));
         });
 
@@ -1280,7 +1306,7 @@ fn build_ui(
             if ui.button("load").clicked() {
                 'load: {
                     let x = std::fs::read_to_string("config.json");
-                    let Ok(x) = x  else {
+                    let Ok(x) = x else {
                         println!("could not open config.json");
                         break 'load;
                     };
