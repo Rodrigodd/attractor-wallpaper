@@ -21,7 +21,7 @@ pub enum Behavior {
     Periodic { lyapunov: f64, to: Point },
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Attractor {
     pub a: [f64; 6],
     pub b: [f64; 6],

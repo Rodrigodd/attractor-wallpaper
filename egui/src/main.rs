@@ -31,7 +31,6 @@ mod channel;
 pub mod widgets;
 
 const BORDER: f64 = 0.1;
-const SAMPLES_PER_ITERATION: u64 = 1_000_000;
 
 enum AttractorMess {
     SetSeed(u64),
@@ -105,7 +104,7 @@ struct Theme {
 type SavedThemes = BTreeMap<String, Theme>;
 
 /// Serializable configuration of the attractor
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct AttractorConfig {
     base_attractor: Attractor,
     base_intensity: i16,
@@ -391,82 +390,7 @@ fn main() {
     let mut render_state = None;
     let mut last_change = Instant::now();
 
-    let seed = 8742;
-    let multisampling = 1;
-    let (attractor, transform) = {
-        let rng = rand::rngs::SmallRng::seed_from_u64(seed);
-        let mut attractor = Attractor::find_strange_attractor(rng, 1_000_000).unwrap();
-        let points = attractor.get_points::<512>();
-
-        // 4 KiB
-        let affine = attractors::affine_from_pca(&points);
-        attractor = attractor.transform_input(affine);
-
-        let bounds = attractor.get_bounds(512);
-
-        let [width, height] = [
-            size.width as f64 * multisampling as f64,
-            size.height as f64 * multisampling as f64,
-        ];
-        let dst = square_bounds(width, height, BORDER);
-        let affine = attractors::map_bounds_affine(dst, bounds);
-
-        (attractor, affine)
-    };
-
-    let attractor_config = AttractorConfig {
-        base_intensity: attractors::get_base_intensity(&attractor),
-        base_attractor: attractor,
-        transform,
-        size,
-        seed,
-        multisampling,
-        anti_aliasing: attractors::AntiAliasing::None,
-        intensity: 1.0,
-        random_start: false,
-        multithreaded: Multithreading::Single,
-        samples_per_iteration: SAMPLES_PER_ITERATION,
-        background_color_1: OkLch::new(0.27, 0.11, 0.07),
-        background_color_2: OkLch::new(0.10, 0.04, 0.07),
-        saved_themes: [
-            (
-                "Hotmap".to_string(),
-                Theme {
-                    background_color_1: OkLch::new(0.27, 0.11, 0.07),
-                    background_color_2: OkLch::new(0.10, 0.04, 0.07),
-                    gradient: Gradient::new(vec![
-                        (0.00, Oklab::new(0.09, 0.02, 0.02)),
-                        (0.03, Oklab::new(0.25, 0.09, 0.05)),
-                        (0.30, Oklab::new(0.50, 0.18, 0.10)),
-                        (0.75, Oklab::new(0.92, -0.05, 0.19)),
-                        (1.00, Oklab::new(1.00, 0.00, 0.00)),
-                    ]),
-                },
-            ),
-            (
-                "pamtoH".to_string(),
-                Theme {
-                    background_color_1: OkLch::new(0.10, 0.04, 0.07),
-                    background_color_2: OkLch::new(0.27, 0.11, 0.07),
-                    gradient: Gradient::new(vec![
-                        (0.00, Oklab::new(1.00, 0.00, 0.00)),
-                        (0.25, Oklab::new(0.92, -0.05, 0.19)),
-                        (0.70, Oklab::new(0.50, 0.18, 0.10)),
-                        (0.97, Oklab::new(0.25, 0.09, 0.05)),
-                        (1.00, Oklab::new(0.09, 0.02, 0.02)),
-                    ]),
-                },
-            ),
-        ]
-        .into(),
-        gradient: Gradient::new(vec![
-            (0.00, Oklab::new(0.09, 0.02, 0.02)),
-            (0.03, Oklab::new(0.25, 0.09, 0.05)),
-            (0.30, Oklab::new(0.50, 0.18, 0.10)),
-            (0.75, Oklab::new(0.92, -0.05, 0.19)),
-            (1.00, Oklab::new(1.00, 0.00, 0.00)),
-        ]),
-    };
+    let attractor_config = AttractorConfig::default();
 
     let mut gui_state = GuiState {
         total_samples_text: 10_000_000.to_string(),
@@ -482,6 +406,15 @@ fn main() {
     let (attractor_sender, recv_conf) = std::sync::mpsc::channel::<AttractorMess>();
     let (mut sender_bitmap, mut recv_bitmap) = channel::channel::<AttractorCtx>();
     let mut attractor = AttractorCtx::new(attractor_config.clone());
+
+    let json = include_str!("default.json");
+    load_config(
+        &attractor_config,
+        size,
+        &mut gui_state,
+        &attractor_sender,
+        json,
+    );
 
     std::thread::spawn(move || loop {
         loop {
@@ -936,7 +869,7 @@ fn build_ui(
     ui.vertical(|ui| {
         ui.my_field("samples per second:", |ui| {
             ui.label(format!(
-                "{:.2e} ({:.2e} samples in {:.2}s))",
+                "{:.2e} ({:.2e} / {:.2}s))",
                 total_samples as f64 / elapsed_time.as_secs_f64(),
                 total_samples,
                 elapsed_time.as_secs_f64()
@@ -951,7 +884,7 @@ fn build_ui(
             }
 
             if ui.button("rand").clicked() {
-                gui_state.set_seed(rand::thread_rng().gen());
+                gui_state.set_seed(rand::thread_rng().gen_range(0..1_000_000));
                 if let Some(seed) = gui_state.seed() {
                     let _ = attractor_sender.send(AttractorMess::SetSeed(seed));
                 }
@@ -1310,49 +1243,53 @@ fn build_ui(
             }
 
             if ui.button("load").clicked() {
-                'load: {
-                    let x = std::fs::read_to_string("config.json");
-                    let Ok(x) = x else {
-                        println!("could not open config.json");
-                        break 'load;
-                    };
-
-                    let c = match serde_json::from_str::<AttractorConfig>(&x) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            println!("could not parse json: {}", e);
-                            break 'load;
-                        }
-                    };
-
-                    let mut config = config.lock();
-                    *config = c;
-
-                    update_from_config(gui_state, &config);
-
-                    update_render(
-                        &mut render_state.attractor_renderer,
-                        &render_state.wgpu_state,
-                        &gui_state.gradient,
-                        gui_state.multisampling,
-                        gui_state.background_color_1,
-                        gui_state.background_color_2,
-                    );
-
-                    drop(config);
-                    let _ = attractor_sender.send(AttractorMess::Update);
-                    let _ = attractor_sender.send(AttractorMess::Resize(
-                        render_state.surface.window().inner_size(),
-                    ));
-                    // Make sure we wait for the attractor to receive the messages. In the call
-                    // below the attractor may still not have received the messages, but in the
-                    // next one it will surely have. This avoids observing the attractor in a
-                    // invalid state when rendering.
-                    attractor_recv.recv(|_| {});
-                }
+                let json = std::fs::read_to_string("config.json");
+                match json {
+                    Ok(json) => {
+                        load_config(
+                            config,
+                            render_state.surface.window().inner_size(),
+                            gui_state,
+                            attractor_sender,
+                            &json,
+                        );
+                        update_render(
+                            &mut render_state.attractor_renderer,
+                            &render_state.wgpu_state,
+                            &gui_state.gradient,
+                            gui_state.multisampling,
+                            gui_state.background_color_1,
+                            gui_state.background_color_2,
+                        );
+                        attractor_recv.recv(|_| {});
+                    }
+                    _ => println!("could not open config.json"),
+                };
             }
         });
     })
+}
+
+fn load_config(
+    config: &parking_lot::lock_api::Mutex<parking_lot::RawMutex, AttractorConfig>,
+    size: PhysicalSize<u32>,
+    gui_state: &mut GuiState,
+    attractor_sender: &Sender<AttractorMess>,
+    json: &str,
+) {
+    let c = match serde_json::from_str::<AttractorConfig>(json) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("could not parse json: {}", e);
+            return;
+        }
+    };
+    let mut config = config.lock();
+    *config = c;
+    update_from_config(gui_state, &config);
+    drop(config);
+    let _ = attractor_sender.send(AttractorMess::Update);
+    let _ = attractor_sender.send(AttractorMess::Resize(size));
 }
 
 fn update_render(
