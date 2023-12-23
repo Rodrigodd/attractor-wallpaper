@@ -617,7 +617,7 @@ fn convolution_code(kernel: &[f32], multisampling: u8, side: usize) -> String {
 
             let v = format!("aggregate_buffer[i0 {} * uniforms.screenWidth {}]", dj, di);
             let c = format!(
-                "c += color(f32({}) / f32(aggregate_buffer[0]), p) * {:?};\n",
+                "c += color(f32({}) / f32(aggregate_buffer[0]) * 1000.0 , p) * {:?};\n",
                 v, k
             );
             code.push_str(&c);

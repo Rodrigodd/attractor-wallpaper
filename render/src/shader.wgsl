@@ -77,7 +77,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         iy * uniforms.screenWidth * multisampling * (multisampling)
         + ix * multisampling;
 
-    // let v = f32(aggregate_buffer[i0]) / f32(aggregate_buffer[0]);
+    // let v = f32(aggregate_buffer[i0]) / f32(aggregate_buffer[0]) * 1000.0;
     // return color(v);
 
     var c = vec4<f32>(0.0, 0.0, 0.0, 0.0);

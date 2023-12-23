@@ -475,7 +475,7 @@ pub fn get_intensity(
 
     let det = tranform[0] * tranform[3] - tranform[1] * tranform[2];
 
-    (base_intensity * total_samples as f32 * p as f32 * det as f32 / 4.0) as i32
+    (base_intensity as f64 * total_samples as f64 * p as f64 * det * 1000.0 / 4.0).round() as i32
 }
 
 fn square_bounds(width: f64, height: f64, border: f64) -> [f64; 4] {
