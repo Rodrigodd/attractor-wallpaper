@@ -118,7 +118,7 @@ pub async fn run_headless(mut cli: Cli, output: PathBuf) {
         let monitor = match ev.primary_monitor() {
             Some(x) => x,
             None => {
-                let Some(x) = ev.available_monitors().next()else {
+                let Some(x) = ev.available_monitors().next() else {
                     println!("ERROR: No monitors found");
                     return;
                 };
@@ -542,7 +542,10 @@ fn rebuild_renderer(
 ) {
     let multisampling = cli.multisampling;
     let task = async move {
-        let Ok(( wgpu_state, surface )) = WgpuState::new_windowed(window).await.map_err(|err| log::error!("{}", err)) else {
+        let Ok((wgpu_state, surface)) = WgpuState::new_windowed(window)
+            .await
+            .map_err(|err| log::error!("{}", err))
+        else {
             return;
         };
         let renderer = AttractorRenderer::new(
