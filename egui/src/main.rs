@@ -1027,6 +1027,14 @@ fn build_ui(
                             gui_state.background_color_1 = theme.background_color_1;
                             gui_state.background_color_2 = theme.background_color_2;
                             gui_state.gradient = theme.gradient.clone();
+
+                            {
+                                let mut config = config.lock();
+                                config.background_color_1 = theme.background_color_1;
+                                config.background_color_2 = theme.background_color_2;
+                                config.gradient = theme.gradient.clone();
+                            }
+
                             changed = true;
                         }
                     }
