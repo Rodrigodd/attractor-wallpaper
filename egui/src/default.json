@@ -16,7 +16,7 @@
   "intensity": 1.0,
   "random_start": false,
   "multithreaded": "Single",
-  "samples_per_iteration": 1000000,
+  "samples_per_iteration": 100000,
   "background_color_1": { "l": 0.15120327, "c": 0.047958434, "h": 0.40199226 },
   "background_color_2": { "l": 0.15120327, "c": 0.047958434, "h": 0.40199226 },
   "saved_themes": {

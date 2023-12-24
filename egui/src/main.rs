@@ -563,7 +563,10 @@ fn main() {
                             let delta_y = position.y - gui_state.last_cursor_position.y;
 
                             let mat = [1.0, 0.0, 0.0, 1.0];
-                            let trans = [-delta_x, -delta_y];
+                            let trans = [
+                                -delta_x * gui_state.multisampling as f64,
+                                -delta_y * gui_state.multisampling as f64,
+                            ];
 
                             let _ = attractor_sender.send(AttractorMess::Transform((mat, trans)));
                         } else if gui_state.rotating {
