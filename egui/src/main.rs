@@ -390,6 +390,9 @@ fn main() {
     let mut render_state = None;
     let mut last_change = Instant::now();
 
+    let mut last_noise = 0.0;
+    let mut exp_moving_avg = 0.0;
+
     let attractor_config = AttractorConfig::default();
 
     let mut gui_state = GuiState {
@@ -657,6 +660,15 @@ fn main() {
                     // drop lock before doing any heavy computation
                     drop(config);
 
+                    {
+                        let noise = attractors::estimate_noise(&at.bitmap, width, height);
+                        let diff = noise - last_noise;
+                        last_noise = noise;
+
+                        let exp = 0.03;
+                        exp_moving_avg = exp_moving_avg * (1.0 - exp) + diff * 0.03;
+                    }
+
                     at.bitmap[0] =
                         render::get_intensity(base_intensity, mat, total_samples, anti_aliasing);
                     render_state
@@ -686,6 +698,7 @@ fn main() {
                                 &attractor_config,
                                 total_sampĺes,
                                 stop_time - last_change,
+                                exp_moving_avg,
                                 render_state,
                                 &mut executor,
                             );
@@ -863,6 +876,7 @@ fn build_ui(
     config: &Mutex<AttractorConfig>,
     total_samples: u64,
     elapsed_time: Duration,
+    convergence: f64,
     render_state: &mut RenderState,
     executor: &mut WinitExecutor<UserEvent>,
 ) -> egui::InnerResponse<()> {
@@ -874,6 +888,9 @@ fn build_ui(
                 total_samples,
                 elapsed_time.as_secs_f64()
             ));
+        });
+        ui.my_field("convergence:", |ui| {
+            ui.label(format!("{:.4e}", convergence,));
         });
 
         ui.my_field("seed:", |ui| {
