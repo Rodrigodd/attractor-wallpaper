@@ -118,9 +118,10 @@ struct AttractorConfig {
     random_start: bool,
     multithreaded: Multithreading,
     samples_per_iteration: u64,
+
+    saved_themes: SavedThemes,
     background_color_1: OkLch,
     background_color_2: OkLch,
-    saved_themes: SavedThemes,
     gradient: Gradient<Oklab>,
 }
 impl Clone for AttractorConfig {
@@ -687,8 +688,9 @@ fn main() {
                 let new_input = egui_state.take_egui_input(window);
 
                 let mut full_output = egui_ctx.run(new_input, |ui| {
-                    egui::Window::new("Hello world!")
-                        .resizable(false) // could not figure out how make this work
+                    egui::Window::new("Configuration")
+                        .resizable(true)
+                        .scroll2([false, true])
                         .show(ui, |ui| {
                             build_ui(
                                 ui,
@@ -881,373 +883,383 @@ fn build_ui(
     executor: &mut WinitExecutor<UserEvent>,
 ) -> egui::InnerResponse<()> {
     ui.vertical(|ui| {
-        ui.my_field("samples per second:", |ui| {
-            ui.label(format!(
-                "{:.2e} ({:.2e} / {:.2}s))",
-                total_samples as f64 / elapsed_time.as_secs_f64(),
-                total_samples,
-                elapsed_time.as_secs_f64()
-            ));
-        });
-        ui.my_field("convergence:", |ui| {
-            ui.label(format!("{:.4e}", convergence,));
-        });
-
-        ui.my_field("seed:", |ui| {
-            if ui.my_text_field(&mut gui_state.seed_text).lost_focus() {
-                if let Some(seed) = gui_state.seed() {
-                    let _ = attractor_sender.send(AttractorMess::SetSeed(seed));
-                }
-            }
-
-            if ui.button("rand").clicked() {
-                gui_state.set_seed(rand::thread_rng().gen_range(0..1_000_000));
-                if let Some(seed) = gui_state.seed() {
-                    let _ = attractor_sender.send(AttractorMess::SetSeed(seed));
-                }
-            }
+        ui.collapsing("stats", |ui| {
+            ui.my_field("samples per second:", |ui| {
+                ui.label(format!(
+                    "{:.2e} ({:.2e} / {:.2}s))",
+                    total_samples as f64 / elapsed_time.as_secs_f64(),
+                    total_samples,
+                    elapsed_time.as_secs_f64()
+                ));
+            });
+            ui.my_field("convergence:", |ui| {
+                ui.label(format!("{:.4e}", convergence,));
+            });
         });
 
-        ui.my_field("multisampling:", |ui| {
-            if ui
-                .add(Slider::new(&mut gui_state.multisampling, 1..=6))
-                .changed()
-            {
-                let _ =
-                    attractor_sender.send(AttractorMess::SetMultisampling(gui_state.multisampling));
-                render_state.attractor_renderer.recreate_aggregate_buffer(
-                    &render_state.wgpu_state.device,
-                    render_state.attractor_renderer.size,
-                    gui_state.multisampling,
-                );
-            }
-        });
-
-        ui.my_field("anti-aliasing:", |ui| {
-            let prev_anti_aliasing = gui_state.anti_aliasing;
-
-            ComboBox::new("anti-aliasing", "")
-                .selected_text(format!("{:?}", gui_state.anti_aliasing))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut gui_state.anti_aliasing, AntiAliasing::None, "None");
-                    ui.selectable_value(
-                        &mut gui_state.anti_aliasing,
-                        AntiAliasing::Bilinear,
-                        "Bilinear",
-                    );
-                    ui.selectable_value(
-                        &mut gui_state.anti_aliasing,
-                        AntiAliasing::Lanczos,
-                        "Lanczos",
-                    );
-                });
-
-            if prev_anti_aliasing != gui_state.anti_aliasing {
-                let _ =
-                    attractor_sender.send(AttractorMess::SetAntialiasing(gui_state.anti_aliasing));
-            }
-        });
-
-        ui.my_field("intensity:", |ui| {
-            if ui
-                .add(Slider::new(&mut gui_state.intensity, 0.01..=4.0))
-                .changed()
-            {
-                let _ = attractor_sender.send(AttractorMess::SetIntensity(gui_state.intensity));
-            }
-        });
-
-        ui.end_row();
-
-        ui.my_field("random start:", |ui| {
-            if ui
-                .add(Checkbox::new(&mut gui_state.random_start, ""))
-                .changed()
-            {
-                let _ =
-                    attractor_sender.send(AttractorMess::SetRandomStart(gui_state.random_start));
-            }
-        });
-
-        ui.my_field("multithreading:", |ui| {
-            let prev_multihreaded = gui_state.multithreaded;
-
-            ComboBox::new("multithreading", "")
-                .selected_text(format!("{:?}", gui_state.multithreaded))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut gui_state.multithreaded,
-                        Multithreading::Single,
-                        "Single",
-                    );
-                    ui.selectable_value(
-                        &mut gui_state.multithreaded,
-                        Multithreading::AtomicMulti,
-                        "AtomicMulti",
-                    );
-                    ui.selectable_value(
-                        &mut gui_state.multithreaded,
-                        Multithreading::MergeMulti,
-                        "MergeMulti",
-                    );
-                });
-
-            if prev_multihreaded != gui_state.multithreaded {
-                let _ =
-                    attractor_sender.send(AttractorMess::SetMultithreaded(gui_state.multithreaded));
-            }
-        });
-
-        ui.my_field("samples per iteration:", |ui| {
-            if ui
-                .my_text_field(&mut gui_state.samples_per_iteration_text)
-                .lost_focus()
-            {
-                if let Some(samples_per_iteration) = gui_state.samples_per_iteration() {
-                    let _ = attractor_sender
-                        .send(AttractorMess::SetSamplesPerIteration(samples_per_iteration));
-                }
-            }
-        });
-
-        ui.separator();
-
-        ui.my_field("themes:", |ui| {
-            ComboBox::new("saved_themes", "")
-                .selected_text(gui_state.theme_name.clone())
-                .show_ui(ui, |ui| {
-                    let mut changed = false;
-                    for (name, theme) in gui_state.saved_themes.iter() {
-                        if ui
-                            .selectable_label(false, name)
-                            .on_hover_text("load gradient")
-                            .clicked()
-                        {
-                            gui_state.theme_name = name.clone();
-                            gui_state.background_color_1 = theme.background_color_1;
-                            gui_state.background_color_2 = theme.background_color_2;
-                            gui_state.gradient = theme.gradient.clone();
-
-                            {
-                                let mut config = config.lock();
-                                config.background_color_1 = theme.background_color_1;
-                                config.background_color_2 = theme.background_color_2;
-                                config.gradient = theme.gradient.clone();
-                            }
-
-                            changed = true;
-                        }
+        ui.collapsing("rendering", |ui| {
+            ui.my_field("seed:", |ui| {
+                if ui.my_text_field(&mut gui_state.seed_text).lost_focus() {
+                    if let Some(seed) = gui_state.seed() {
+                        let _ = attractor_sender.send(AttractorMess::SetSeed(seed));
                     }
-
-                    if changed {
-                        update_render(
-                            &mut render_state.attractor_renderer,
-                            &render_state.wgpu_state,
-                            &gui_state.gradient,
-                            gui_state.multisampling,
-                            gui_state.background_color_1,
-                            gui_state.background_color_2,
-                        );
-                    }
-                });
-        });
-
-        ui.my_field("theme name:", |ui| {
-            if ui.my_text_field(&mut gui_state.theme_name).changed() {
-                config
-                    .lock()
-                    .saved_themes
-                    .clone_from(&gui_state.saved_themes);
-            }
-        });
-
-        ui.my_field("background color 1:", |ui| {
-            if ui
-                .my_color_picker(&mut gui_state.background_color_1)
-                .changed()
-            {
-                config.lock().background_color_1 = gui_state.background_color_1;
-
-                let c1 = LinSrgb::from(gui_state.background_color_1).clip();
-                let c2 = LinSrgb::from(gui_state.background_color_2).clip();
-                render_state.attractor_renderer.set_background_color(
-                    &render_state.wgpu_state.queue,
-                    [c1.r, c1.g, c1.b, 1.0],
-                    [c2.r, c2.g, c2.b, 1.0],
-                );
-            }
-        });
-
-        ui.my_field("background color 2:", |ui| {
-            if ui
-                .my_color_picker(&mut gui_state.background_color_2)
-                .changed()
-            {
-                config.lock().background_color_2 = gui_state.background_color_2;
-
-                let c1 = LinSrgb::from(gui_state.background_color_1).clip();
-                let c2 = LinSrgb::from(gui_state.background_color_2).clip();
-                render_state.attractor_renderer.set_background_color(
-                    &render_state.wgpu_state.queue,
-                    [c1.r, c1.g, c1.b, 1.0],
-                    [c2.r, c2.g, c2.b, 1.0],
-                );
-            }
-        });
-
-        if ui.my_gradient_picker(&mut gui_state.gradient) {
-            config.lock().gradient.clone_from(&gui_state.gradient);
-            render_state.attractor_renderer.set_colormap(
-                &render_state.wgpu_state.queue,
-                gui_state
-                    .gradient
-                    .monotonic_hermit_spline_coefs()
-                    .into_iter()
-                    .map(|x| x.into())
-                    .collect(),
-            )
-        }
-
-        ui.my_field("save theme:", |ui| {
-            if ui.button("save").clicked() {
-                gui_state.saved_themes.insert(
-                    gui_state.theme_name.clone(),
-                    Theme {
-                        background_color_1: gui_state.background_color_1,
-                        background_color_2: gui_state.background_color_2,
-                        gradient: gui_state.gradient.clone(),
-                    },
-                );
-                config
-                    .lock()
-                    .saved_themes
-                    .clone_from(&gui_state.saved_themes);
-            }
-        });
-
-        ui.separator();
-
-        ui.my_field("total samples:", |ui| {
-            ui.my_text_field(&mut gui_state.total_samples_text);
-        });
-
-        if gui_state.wallpaper_thread.is_some() {
-            ui.spinner();
-        } else if ui.button("Set as wallpaper").clicked() {
-            let mut attractor = attractor_recv
-                .recv(|x| {
-                    let config = x.config.lock().clone();
-                    let config = Arc::new(Mutex::new(config));
-                    AttractorCtx::new(config)
-                })
-                .unwrap();
-
-            let monitor_size = render_state
-                .surface
-                .window()
-                .current_monitor()
-                .unwrap()
-                .size();
-
-            let multisampling = attractor.config.lock().multisampling;
-
-            attractor.resize(monitor_size, multisampling);
-            attractor.config.lock().samples_per_iteration = gui_state.total_samples().unwrap();
-
-            let multithreaded = gui_state.multithreaded;
-
-            let handle = std::thread::spawn(move || {
-                match multithreaded {
-                    Multithreading::Single => aggregate_attractor(&mut attractor),
-                    Multithreading::AtomicMulti => atomic_par_aggregate_attractor(&mut attractor),
-                    Multithreading::MergeMulti => merge_par_aggregate_attractor(&mut attractor),
                 }
-                attractor
+
+                if ui.button("rand").clicked() {
+                    gui_state.set_seed(rand::thread_rng().gen_range(0..1_000_000));
+                    if let Some(seed) = gui_state.seed() {
+                        let _ = attractor_sender.send(AttractorMess::SetSeed(seed));
+                    }
+                }
             });
 
-            gui_state.wallpaper_thread = Some(handle);
-        }
+            ui.my_field("multisampling:", |ui| {
+                if ui
+                    .add(Slider::new(&mut gui_state.multisampling, 1..=6))
+                    .changed()
+                {
+                    let _ = attractor_sender
+                        .send(AttractorMess::SetMultisampling(gui_state.multisampling));
+                    render_state.attractor_renderer.recreate_aggregate_buffer(
+                        &render_state.wgpu_state.device,
+                        render_state.attractor_renderer.size,
+                        gui_state.multisampling,
+                    );
+                }
+            });
 
-        if gui_state
-            .wallpaper_thread
-            .as_mut()
-            .map_or(false, |x| x.is_finished())
-        {
-            let wallpaper_handle = gui_state.wallpaper_thread.take().unwrap();
+            ui.my_field("anti-aliasing:", |ui| {
+                let prev_anti_aliasing = gui_state.anti_aliasing;
 
-            let AttractorCtx {
-                mut bitmap,
-                total_samples,
-                config,
-                ..
-            } = wallpaper_handle.join().unwrap();
+                ComboBox::new("anti-aliasing", "")
+                    .selected_text(format!("{:?}", gui_state.anti_aliasing))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut gui_state.anti_aliasing,
+                            AntiAliasing::None,
+                            "None",
+                        );
+                        ui.selectable_value(
+                            &mut gui_state.anti_aliasing,
+                            AntiAliasing::Bilinear,
+                            "Bilinear",
+                        );
+                        ui.selectable_value(
+                            &mut gui_state.anti_aliasing,
+                            AntiAliasing::Lanczos,
+                            "Lanczos",
+                        );
+                    });
 
-            let config = Arc::try_unwrap(config).unwrap().into_inner();
+                if prev_anti_aliasing != gui_state.anti_aliasing {
+                    let _ = attractor_sender
+                        .send(AttractorMess::SetAntialiasing(gui_state.anti_aliasing));
+                }
+            });
 
-            let AttractorConfig {
-                size,
-                base_intensity,
-                multisampling,
-                anti_aliasing,
-                gradient,
-                background_color_1,
-                background_color_2,
-                transform: (mat, _),
-                ..
-            } = config;
+            ui.my_field("intensity:", |ui| {
+                if ui
+                    .add(Slider::new(&mut gui_state.intensity, 0.01..=4.0))
+                    .changed()
+                {
+                    let _ = attractor_sender.send(AttractorMess::SetIntensity(gui_state.intensity));
+                }
+            });
 
-            let task = async move {
-                let wgpu_state = WgpuState::new_headless().await.unwrap();
-                let mut attractor_renderer = AttractorRenderer::new(
-                    &wgpu_state.device,
-                    size,
-                    wgpu::TextureFormat::Rgba8UnormSrgb,
-                    multisampling,
+            ui.my_field("random start:", |ui| {
+                if ui
+                    .add(Checkbox::new(&mut gui_state.random_start, ""))
+                    .changed()
+                {
+                    let _ = attractor_sender
+                        .send(AttractorMess::SetRandomStart(gui_state.random_start));
+                }
+            });
+
+            ui.my_field("multithreading:", |ui| {
+                let prev_multihreaded = gui_state.multithreaded;
+
+                ComboBox::new("multithreading", "")
+                    .selected_text(format!("{:?}", gui_state.multithreaded))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut gui_state.multithreaded,
+                            Multithreading::Single,
+                            "Single",
+                        );
+                        ui.selectable_value(
+                            &mut gui_state.multithreaded,
+                            Multithreading::AtomicMulti,
+                            "AtomicMulti",
+                        );
+                        ui.selectable_value(
+                            &mut gui_state.multithreaded,
+                            Multithreading::MergeMulti,
+                            "MergeMulti",
+                        );
+                    });
+
+                if prev_multihreaded != gui_state.multithreaded {
+                    let _ = attractor_sender
+                        .send(AttractorMess::SetMultithreaded(gui_state.multithreaded));
+                }
+            });
+
+            ui.my_field("samples per iteration:", |ui| {
+                if ui
+                    .my_text_field(&mut gui_state.samples_per_iteration_text)
+                    .lost_focus()
+                {
+                    if let Some(samples_per_iteration) = gui_state.samples_per_iteration() {
+                        let _ = attractor_sender
+                            .send(AttractorMess::SetSamplesPerIteration(samples_per_iteration));
+                    }
+                }
+            });
+        });
+
+        ui.collapsing("theme", |ui| {
+            ui.my_field("themes:", |ui| {
+                ComboBox::new("saved_themes", "")
+                    .selected_text(gui_state.theme_name.clone())
+                    .show_ui(ui, |ui| {
+                        let mut changed = false;
+                        for (name, theme) in gui_state.saved_themes.iter() {
+                            if ui
+                                .selectable_label(false, name)
+                                .on_hover_text("load gradient")
+                                .clicked()
+                            {
+                                gui_state.theme_name = name.clone();
+                                gui_state.background_color_1 = theme.background_color_1;
+                                gui_state.background_color_2 = theme.background_color_2;
+                                gui_state.gradient = theme.gradient.clone();
+
+                                {
+                                    let mut config = config.lock();
+                                    config.background_color_1 = theme.background_color_1;
+                                    config.background_color_2 = theme.background_color_2;
+                                    config.gradient = theme.gradient.clone();
+                                }
+
+                                changed = true;
+                            }
+                        }
+
+                        if changed {
+                            update_render(
+                                &mut render_state.attractor_renderer,
+                                &render_state.wgpu_state,
+                                &gui_state.gradient,
+                                gui_state.multisampling,
+                                gui_state.background_color_1,
+                                gui_state.background_color_2,
+                            );
+                        }
+                    });
+            });
+
+            ui.my_field("theme name:", |ui| {
+                if ui.my_text_field(&mut gui_state.theme_name).changed() {
+                    config
+                        .lock()
+                        .saved_themes
+                        .clone_from(&gui_state.saved_themes);
+                }
+            });
+
+            ui.my_field("background color 1:", |ui| {
+                if ui
+                    .my_color_picker(&mut gui_state.background_color_1)
+                    .changed()
+                {
+                    config.lock().background_color_1 = gui_state.background_color_1;
+
+                    let c1 = LinSrgb::from(gui_state.background_color_1).clip();
+                    let c2 = LinSrgb::from(gui_state.background_color_2).clip();
+                    render_state.attractor_renderer.set_background_color(
+                        &render_state.wgpu_state.queue,
+                        [c1.r, c1.g, c1.b, 1.0],
+                        [c2.r, c2.g, c2.b, 1.0],
+                    );
+                }
+            });
+
+            ui.my_field("background color 2:", |ui| {
+                if ui
+                    .my_color_picker(&mut gui_state.background_color_2)
+                    .changed()
+                {
+                    config.lock().background_color_2 = gui_state.background_color_2;
+
+                    let c1 = LinSrgb::from(gui_state.background_color_1).clip();
+                    let c2 = LinSrgb::from(gui_state.background_color_2).clip();
+                    render_state.attractor_renderer.set_background_color(
+                        &render_state.wgpu_state.queue,
+                        [c1.r, c1.g, c1.b, 1.0],
+                        [c2.r, c2.g, c2.b, 1.0],
+                    );
+                }
+            });
+
+            if ui.my_gradient_picker(&mut gui_state.gradient) {
+                config.lock().gradient.clone_from(&gui_state.gradient);
+                render_state.attractor_renderer.set_colormap(
+                    &render_state.wgpu_state.queue,
+                    gui_state
+                        .gradient
+                        .monotonic_hermit_spline_coefs()
+                        .into_iter()
+                        .map(|x| x.into())
+                        .collect(),
                 )
-                .unwrap();
+            }
 
-                bitmap[0] =
-                    render::get_intensity(base_intensity as f32, mat, total_samples, anti_aliasing);
-                attractor_renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
+            ui.my_field("save theme:", |ui| {
+                if ui.button("save").clicked() {
+                    gui_state.saved_themes.insert(
+                        gui_state.theme_name.clone(),
+                        Theme {
+                            background_color_1: gui_state.background_color_1,
+                            background_color_2: gui_state.background_color_2,
+                            gradient: gui_state.gradient.clone(),
+                        },
+                    );
+                    config
+                        .lock()
+                        .saved_themes
+                        .clone_from(&gui_state.saved_themes);
+                }
+            });
+        });
 
-                update_render(
-                    &mut attractor_renderer,
-                    &wgpu_state,
-                    &gradient,
+        ui.collapsing("wallpaper", |ui| {
+            ui.my_field("total samples:", |ui| {
+                ui.my_text_field(&mut gui_state.total_samples_text);
+            });
+
+            if gui_state.wallpaper_thread.is_some() {
+                ui.spinner();
+            } else if ui.button("Set as wallpaper").clicked() {
+                let mut attractor = attractor_recv
+                    .recv(|x| {
+                        let config = x.config.lock().clone();
+                        let config = Arc::new(Mutex::new(config));
+                        AttractorCtx::new(config)
+                    })
+                    .unwrap();
+
+                let monitor_size = render_state
+                    .surface
+                    .window()
+                    .current_monitor()
+                    .unwrap()
+                    .size();
+
+                let multisampling = attractor.config.lock().multisampling;
+
+                attractor.resize(monitor_size, multisampling);
+                attractor.config.lock().samples_per_iteration = gui_state.total_samples().unwrap();
+
+                let multithreaded = gui_state.multithreaded;
+
+                let handle = std::thread::spawn(move || {
+                    match multithreaded {
+                        Multithreading::Single => aggregate_attractor(&mut attractor),
+                        Multithreading::AtomicMulti => {
+                            atomic_par_aggregate_attractor(&mut attractor)
+                        }
+                        Multithreading::MergeMulti => merge_par_aggregate_attractor(&mut attractor),
+                    }
+                    attractor
+                });
+
+                gui_state.wallpaper_thread = Some(handle);
+            }
+
+            if gui_state
+                .wallpaper_thread
+                .as_mut()
+                .map_or(false, |x| x.is_finished())
+            {
+                let wallpaper_handle = gui_state.wallpaper_thread.take().unwrap();
+
+                let AttractorCtx {
+                    mut bitmap,
+                    total_samples,
+                    config,
+                    ..
+                } = wallpaper_handle.join().unwrap();
+
+                let config = Arc::try_unwrap(config).unwrap().into_inner();
+
+                let AttractorConfig {
+                    size,
+                    base_intensity,
                     multisampling,
+                    anti_aliasing,
+                    gradient,
                     background_color_1,
                     background_color_2,
-                );
+                    transform: (mat, _),
+                    ..
+                } = config;
 
-                let texture = wgpu_state.new_target_texture(size);
-                let view = texture.create_view(&Default::default());
-                attractor_renderer.render(&wgpu_state.device, &wgpu_state.queue, &view);
+                let task = async move {
+                    let wgpu_state = WgpuState::new_headless().await.unwrap();
+                    let mut attractor_renderer = AttractorRenderer::new(
+                        &wgpu_state.device,
+                        size,
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                        multisampling,
+                    )
+                    .unwrap();
 
-                let bitmap = wgpu_state.copy_texture_content(texture);
+                    bitmap[0] = render::get_intensity(
+                        base_intensity as f32,
+                        mat,
+                        total_samples,
+                        anti_aliasing,
+                    );
+                    attractor_renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
 
-                let path = "wallpaper.png";
+                    update_render(
+                        &mut attractor_renderer,
+                        &wgpu_state,
+                        &gradient,
+                        multisampling,
+                        background_color_1,
+                        background_color_2,
+                    );
 
-                image::save_buffer(
-                    path,
-                    &bitmap,
-                    size.width,
-                    size.height,
-                    image::ColorType::Rgba8,
-                )
-                .unwrap();
+                    let texture = wgpu_state.new_target_texture(size);
+                    let view = texture.create_view(&Default::default());
+                    attractor_renderer.render(&wgpu_state.device, &wgpu_state.queue, &view);
 
-                // kill swaybg
-                println!("killing swaybg");
-                let _ = std::process::Command::new("killall").arg("swaybg").output();
+                    let bitmap = wgpu_state.copy_texture_content(texture);
 
-                println!("setting wallpaper");
-                wallpaper::set_from_path(path).unwrap();
-                println!("wallpaper set");
-            };
-            executor.spawn(task);
-        }
+                    let path = "wallpaper.png";
 
-        ui.separator();
+                    image::save_buffer(
+                        path,
+                        &bitmap,
+                        size.width,
+                        size.height,
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+
+                    // kill swaybg
+                    println!("killing swaybg");
+                    let _ = std::process::Command::new("killall").arg("swaybg").output();
+
+                    println!("setting wallpaper");
+                    wallpaper::set_from_path(path).unwrap();
+                    println!("wallpaper set");
+                };
+                executor.spawn(task);
+            }
+        });
 
         ui.horizontal(|ui| {
             if ui.button("Save").clicked() {
@@ -1452,7 +1464,7 @@ trait MyUiExt {
 
 impl MyUiExt for Ui {
     fn my_text_field(&mut self, text: &mut String) -> Response {
-        self.add_sized([120.0, self.available_height()], TextEdit::singleline(text))
+        self.add_sized([100.0, self.available_height()], TextEdit::singleline(text))
     }
 
     fn my_color_picker(&mut self, oklch: &mut OkLch) -> Response {
