@@ -665,7 +665,7 @@ fn main() {
                     // drop lock before doing any heavy computation
                     drop(config);
 
-                    {
+                    if at.stop_time.is_none() {
                         let noise = attractors::estimate_noise(&at.bitmap, width, height);
                         let diff = noise - last_noise;
                         last_noise = noise;
