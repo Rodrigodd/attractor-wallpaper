@@ -1,5 +1,3 @@
-#![allow(clippy::let_and_return)]
-
 use std::{
     collections::BTreeMap,
     sync::{atomic::AtomicI32, mpsc::Sender, Arc},
@@ -120,6 +118,7 @@ struct AttractorConfig {
     samples_per_iteration: u64,
 
     saved_themes: SavedThemes,
+    theme_name: String,
     background_color_1: OkLch,
     background_color_2: OkLch,
     gradient: Gradient<Oklab>,
@@ -141,6 +140,7 @@ impl Clone for AttractorConfig {
             background_color_1: self.background_color_1,
             background_color_2: self.background_color_2,
             saved_themes: self.saved_themes.clone(),
+            theme_name: self.theme_name.clone(),
             gradient: self.gradient.clone(),
         }
     }
@@ -163,6 +163,7 @@ impl Clone for AttractorConfig {
         self.background_color_2
             .clone_from(&source.background_color_2);
         self.saved_themes.clone_from(&source.saved_themes);
+        self.theme_name.clone_from(&source.theme_name);
         self.gradient.clone_from(&source.gradient);
     }
 }
@@ -1024,7 +1025,7 @@ fn build_ui(
         ui.collapsing("theme", |ui| {
             ui.my_field("themes:", |ui| {
                 ComboBox::new("saved_themes", "")
-                    .selected_text(gui_state.theme_name.clone())
+                    // .selected_text(gui_state.theme_name.clone())
                     .show_ui(ui, |ui| {
                         let mut changed = false;
                         for (name, theme) in gui_state.saved_themes.iter() {
@@ -1040,6 +1041,7 @@ fn build_ui(
 
                                 {
                                     let mut config = config.lock();
+                                    config.theme_name = name.clone();
                                     config.background_color_1 = theme.background_color_1;
                                     config.background_color_2 = theme.background_color_2;
                                     config.gradient = theme.gradient.clone();
@@ -1371,9 +1373,10 @@ fn update_from_config(gui_state: &mut GuiState, config: &AttractorConfig) {
     gui_state.random_start = config.random_start;
     gui_state.samples_per_iteration_text = config.samples_per_iteration.to_string();
     gui_state.multithreaded = config.multithreaded;
+    gui_state.saved_themes = config.saved_themes.clone();
+    gui_state.theme_name = config.theme_name.clone();
     gui_state.background_color_1 = config.background_color_1;
     gui_state.background_color_2 = config.background_color_2;
-    gui_state.saved_themes = config.saved_themes.clone();
     gui_state.gradient.clone_from(&config.gradient);
 }
 

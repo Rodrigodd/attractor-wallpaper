@@ -17,8 +17,6 @@
   "random_start": false,
   "multithreaded": "Single",
   "samples_per_iteration": 100000,
-  "background_color_1": { "l": 0.15120327, "c": 0.047958434, "h": 0.40199226 },
-  "background_color_2": { "l": 0.15120327, "c": 0.047958434, "h": 0.40199226 },
   "saved_themes": {
     "Cold": {
       "background_color_1": { "l": 0.27, "c": 0.11, "h": 0.6644922 },
@@ -60,6 +58,9 @@
       }
     }
   },
+  "theme_name": "Forest",
+  "background_color_1": { "l": 0.15120327, "c": 0.047958434, "h": 0.40199226 },
+  "background_color_2": { "l": 0.15120327, "c": 0.047958434, "h": 0.40199226 },
   "gradient": {
     "colors": [
       [ 0.0, { "l": 0.09640302, "a": -0.0045896843, "b": -0.01945331 } ],
