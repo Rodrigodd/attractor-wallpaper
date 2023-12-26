@@ -20,6 +20,7 @@ use parking_lot::Mutex;
 use rand::prelude::*;
 
 use render::{AttractorRenderer, SurfaceState, TaskId, WgpuState, WinitExecutor};
+use winit::event::{KeyboardInput, ModifiersState, VirtualKeyCode};
 
 use crate::widgets::ok_picker::ToColor32;
 
@@ -41,6 +42,80 @@ enum AttractorMess {
     Resize(PhysicalSize<u32>),
     Transform(Affine),
     Update,
+}
+
+mod cli {
+    use clap::Parser;
+
+    #[derive(Parser)]
+    #[command(author, version, about, long_about = None)]
+    pub struct Cli {
+        /// Spawn a window in fullscreen mode. In headless mode, make the output image the same
+        /// size as the focused monitor.
+        #[arg(short, long, default_value = "false")]
+        pub fullscreen: bool,
+
+        /// Enable anti-aliasing.
+        #[arg(short, long, default_value = "none")]
+        pub anti_aliasing: AntiAliasing,
+
+        /// The seed to use for the sequence of generated attractors.
+        #[arg(short, long)]
+        pub seed: Option<u64>,
+
+        /// Render the attractor into a buffer with both dimensions scaled by this factor, and them
+        /// downsample it to the expected size. Used for anti-aliasing.
+        #[arg(short, long, default_value = "1")]
+        pub multisampling: u8,
+
+        /*
+        /// Renders in headless mode, and outputs the attractor to the given file.
+        #[arg(short, long)]
+        pub output: Option<PathBuf>,
+
+        /// The dimensions for the rendered attractor, in pixels.
+        #[arg(short, long, default_value = "512x512", value_parser = size_value_parser, conflicts_with = "fullscreen")]
+        pub dimensions: winit::dpi::PhysicalSize<u32>,
+        */
+        /// The name of one of the saved themes to use.
+        #[arg(short, long)]
+        pub theme: Option<String>,
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+    pub enum AntiAliasing {
+        None,
+        Bilinear,
+        Lanczos,
+    }
+    impl AntiAliasing {
+        pub fn into_attractors_antialiasing(self) -> attractors::AntiAliasing {
+            match self {
+                Self::None => attractors::AntiAliasing::None,
+                Self::Bilinear => attractors::AntiAliasing::Bilinear,
+                Self::Lanczos => attractors::AntiAliasing::Lanczos,
+            }
+        }
+    }
+
+    // fn size_value_parser(s: &str) -> Result<winit::dpi::PhysicalSize<u32>, String> {
+    //     let mut parts = s.split('x');
+    //     let width = parts
+    //         .next()
+    //         .ok_or_else(|| "Missing width".to_string())
+    //         .and_then(|s| {
+    //             s.parse::<u32>()
+    //                 .map_err(|err| format!("Invalid width: {}", err))
+    //         })?;
+    //     let height = parts
+    //         .next()
+    //         .ok_or_else(|| "Missing height".to_string())
+    //         .and_then(|s| {
+    //             s.parse::<u32>()
+    //                 .map_err(|err| format!("Invalid height: {}", err))
+    //         })?;
+    //     Ok(winit::dpi::PhysicalSize::new(width, height))
+    // }
 }
 
 async fn build_renderer(window: Window, proxy: EventLoopProxy<UserEvent>) {
@@ -173,6 +248,34 @@ impl AttractorConfig {
         let height = self.size.height as usize * self.multisampling as usize;
         [width, height]
     }
+
+    fn set_theme(&mut self, name: &String, theme: &Theme) {
+        self.theme_name.clone_from(name);
+        self.background_color_1 = theme.background_color_1;
+        self.background_color_2 = theme.background_color_2;
+        self.gradient = theme.gradient.clone();
+    }
+
+    fn set_seed(&mut self, seed: u64) {
+        self.seed = seed;
+        let rng = rand::rngs::SmallRng::seed_from_u64(seed);
+        let mut attractor = Attractor::find_strange_attractor(rng, 1_000_000).unwrap();
+        let points = attractor.get_points::<512>();
+
+        // 4 KiB
+        let affine = attractors::affine_from_pca(&points);
+        attractor = attractor.transform_input(affine);
+
+        let bounds = attractor.get_bounds(512);
+
+        let [width, height] = self.bitmap_size();
+        let dst = square_bounds(width as f64, height as f64, BORDER);
+        let affine = attractors::map_bounds_affine(dst, bounds);
+
+        self.base_intensity = attractors::get_base_intensity(&attractor);
+        self.base_attractor = attractor;
+        self.transform = affine;
+    }
 }
 
 #[derive(Clone)]
@@ -265,27 +368,9 @@ impl AttractorCtx {
 
     fn set_seed(&mut self, seed: u64) {
         {
-            self.config.lock().seed = seed;
-            let rng = rand::rngs::SmallRng::seed_from_u64(seed);
-            let mut attractor = Attractor::find_strange_attractor(rng, 1_000_000).unwrap();
-            let points = attractor.get_points::<512>();
-
-            // 4 KiB
-            let affine = attractors::affine_from_pca(&points);
-            attractor = attractor.transform_input(affine);
-
-            let bounds = attractor.get_bounds(512);
-
             let mut config = self.config.lock();
-
-            let [width, height] = config.bitmap_size();
-            let dst = square_bounds(width as f64, height as f64, BORDER);
-            let affine = attractors::map_bounds_affine(dst, bounds);
-
-            config.base_intensity = attractors::get_base_intensity(&attractor);
-            config.base_attractor = attractor;
-            config.transform = affine;
-            self.attractor = attractor.transform_input(config.transform);
+            config.set_seed(seed);
+            self.attractor = config.base_attractor.transform_input(config.transform);
         };
 
         self.clear();
@@ -368,6 +453,8 @@ impl GuiState {
 }
 
 fn main() {
+    let cli = <cli::Cli as clap::Parser>::parse();
+
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
 
     let size = egui_winit::winit::dpi::PhysicalSize::<u32>::new(800, 600);
@@ -377,6 +464,12 @@ fn main() {
         .with_inner_size(size);
 
     let wb = { wb.with_name("dev", "") };
+
+    let wb = if cli.fullscreen {
+        wb.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)))
+    } else {
+        wb
+    };
 
     let window = wb.build(&event_loop).unwrap();
 
@@ -395,7 +488,40 @@ fn main() {
     let mut last_noise = 0.0;
     let mut exp_moving_avg = 0.0;
 
-    let attractor_config = AttractorConfig::default();
+    let json = include_str!("default.json");
+    let mut attractor_config = serde_json::from_str::<AttractorConfig>(json).unwrap();
+
+    {
+        let cli::Cli {
+            fullscreen: _,
+            anti_aliasing,
+            seed,
+            multisampling,
+            // output: _,
+            // dimensions: _,
+            theme,
+        } = cli;
+
+        let config = &mut attractor_config;
+
+        config.anti_aliasing = anti_aliasing.into_attractors_antialiasing();
+        if let Some(seed) = seed {
+            config.set_seed(seed);
+        }
+        config.multisampling = multisampling;
+
+        if let Some(name) = theme {
+            if let Some(theme) = config.saved_themes.get(&name).cloned() {
+                config.set_theme(&name, &theme);
+            } else {
+                eprintln!("Theme {} not found. Avaliable themes are:", name);
+                for name in config.saved_themes.keys() {
+                    eprintln!("  - {}", name);
+                }
+                std::process::exit(1);
+            }
+        }
+    }
 
     let mut gui_state = GuiState {
         total_samples_text: 10_000_000.to_string(),
@@ -411,15 +537,6 @@ fn main() {
     let (attractor_sender, recv_conf) = std::sync::mpsc::channel::<AttractorMess>();
     let (mut sender_bitmap, mut recv_bitmap) = channel::channel::<AttractorCtx>();
     let mut attractor = AttractorCtx::new(attractor_config.clone());
-
-    let json = include_str!("default.json");
-    load_config(
-        &attractor_config,
-        size,
-        &mut gui_state,
-        &attractor_sender,
-        json,
-    );
 
     std::thread::spawn(move || loop {
         loop {
@@ -489,6 +606,8 @@ fn main() {
 
     // attractor.send_mess = Some(sender_conf);
 
+    let mut modifiers = ModifiersState::empty();
+
     event_loop.run(move |event, _, control_flow| {
         // control_flow is a reference to an enum which tells us how to run the event loop.
         // See the docs for details: https://docs.rs/winit/0.22.2/winit/enum.ControlFlow.html
@@ -538,6 +657,43 @@ fn main() {
                 }
 
                 match event {
+                    WindowEvent::ModifiersChanged(m) => modifiers = m,
+                    WindowEvent::KeyboardInput {
+                        input:
+                            KeyboardInput {
+                                state: ElementState::Pressed,
+                                virtual_keycode: Some(virtual_keycode),
+                                ..
+                            },
+                        ..
+                    } => match virtual_keycode {
+                        VirtualKeyCode::NumpadEnter | VirtualKeyCode::Return if modifiers.alt() => {
+                            println!("toggling fullscreen");
+                            let window = render_state.surface.window();
+                            if window.fullscreen().is_some() {
+                                // window.set_decorations(true);
+                                window.set_fullscreen(None);
+                            } else {
+                                // window.set_decorations(false);
+                                // window.set_fullscreen(Some(
+                                //     winit::window::Fullscreen::Borderless(None),
+                                // ));
+                                if let Some(monitor) = window.current_monitor() {
+                                    window.set_fullscreen(Some(
+                                        winit::window::Fullscreen::Borderless(Some(monitor)),
+                                    ));
+                                } else {
+                                    window.set_fullscreen(Some(
+                                        winit::window::Fullscreen::Borderless(None),
+                                    ));
+                                }
+                            }
+                        }
+                        VirtualKeyCode::Q => {
+                            *control_flow = ControlFlow::Exit;
+                        }
+                        _ => {}
+                    },
                     WindowEvent::MouseInput {
                         state,
                         button: MouseButton::Left,
@@ -1039,13 +1195,7 @@ fn build_ui(
                                 gui_state.background_color_2 = theme.background_color_2;
                                 gui_state.gradient = theme.gradient.clone();
 
-                                {
-                                    let mut config = config.lock();
-                                    config.theme_name = name.clone();
-                                    config.background_color_1 = theme.background_color_1;
-                                    config.background_color_2 = theme.background_color_2;
-                                    config.gradient = theme.gradient.clone();
-                                }
+                                config.lock().set_theme(name, theme);
 
                                 changed = true;
                             }
@@ -1288,13 +1438,15 @@ fn build_ui(
                 let json = std::fs::read_to_string("config.json");
                 match json {
                     Ok(json) => {
-                        load_config(
-                            config,
-                            render_state.surface.window().inner_size(),
-                            gui_state,
-                            attractor_sender,
-                            &json,
-                        );
+                        let mut config = config.lock();
+                        let c = match serde_json::from_str::<AttractorConfig>(&json) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                println!("could not parse json: {}", e);
+                                return;
+                            }
+                        };
+                        *config = c;
                         update_render(
                             &mut render_state.attractor_renderer,
                             &render_state.wgpu_state,
@@ -1303,6 +1455,11 @@ fn build_ui(
                             gui_state.background_color_1,
                             gui_state.background_color_2,
                         );
+                        update_from_config(gui_state, &config);
+                        drop(config);
+                        let _ = attractor_sender.send(AttractorMess::Update);
+                        let _ = attractor_sender
+                            .send(AttractorMess::Resize(render_state.surface.size()));
                         attractor_recv.recv(|_| {});
                     }
                     _ => println!("could not open config.json"),
@@ -1310,28 +1467,6 @@ fn build_ui(
             }
         });
     })
-}
-
-fn load_config(
-    config: &parking_lot::lock_api::Mutex<parking_lot::RawMutex, AttractorConfig>,
-    size: PhysicalSize<u32>,
-    gui_state: &mut GuiState,
-    attractor_sender: &Sender<AttractorMess>,
-    json: &str,
-) {
-    let c = match serde_json::from_str::<AttractorConfig>(json) {
-        Ok(c) => c,
-        Err(e) => {
-            println!("could not parse json: {}", e);
-            return;
-        }
-    };
-    let mut config = config.lock();
-    *config = c;
-    update_from_config(gui_state, &config);
-    drop(config);
-    let _ = attractor_sender.send(AttractorMess::Update);
-    let _ = attractor_sender.send(AttractorMess::Resize(size));
 }
 
 fn update_render(
