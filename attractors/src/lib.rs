@@ -157,11 +157,22 @@ impl Attractor {
         Behavior::Chaotic { lyapunov, to: p0 }
     }
 
-    pub fn find_strange_attractor(mut rng: impl rand::RngCore, tries: usize) -> Option<Self> {
+    pub fn find_strange_attractor(
+        mut rng: impl rand::RngCore,
+        min_area: u16,
+        max_area: u16,
+        tries: usize,
+    ) -> Option<Self> {
         for _ in 0..tries {
             let mut attractor = Self::random(&mut rng);
             if let Behavior::Chaotic { lyapunov, to } = attractor.check_behavior() {
                 println!("found attractor with lyapunov exponent {}", lyapunov);
+
+                let area = get_base_area(&attractor);
+                if area < min_area || area > max_area {
+                    continue;
+                }
+
                 attractor.start = to;
                 return Some(attractor);
             }
@@ -524,7 +535,7 @@ pub fn get_base_intensity(attractor: &Attractor) -> i16 {
 }
 
 /// Get a reference for the area covered by the attractor.
-pub fn get_base_area(attractor: &Attractor) -> usize {
+pub fn get_base_area(attractor: &Attractor) -> u16 {
     let mut thumbnail = generate_thumbnail(attractor);
 
     const THRESHOLD: i16 = 2;
@@ -542,7 +553,10 @@ pub fn get_base_area(attractor: &Attractor) -> usize {
         thumbnail.swap(i, count);
     }
 
-    count
+    // Make sure that the maximum possible area is within the return type.
+    const _: () = assert!(THUMB_WIDTH * THUMB_HEIGHT <= u16::MAX as usize);
+
+    count as u16
 }
 
 /// Estimate the ammount of noise in the bitmap by the sum of the sum of absolute differences along

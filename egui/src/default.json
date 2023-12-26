@@ -11,6 +11,7 @@
   ],
   "size": { "width": 800, "height": 600 },
   "seed": 3,
+  "min_area": 750,
   "multisampling": 1,
   "anti_aliasing": "None",
   "intensity": 1.0,

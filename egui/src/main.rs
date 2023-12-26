@@ -33,6 +33,7 @@ const BORDER: f64 = 0.1;
 
 enum AttractorMess {
     SetSeed(u64),
+    SetMinArea(u16),
     SetMultisampling(u8),
     SetAntialiasing(AntiAliasing),
     SetIntensity(f32),
@@ -185,6 +186,7 @@ struct AttractorConfig {
     size: PhysicalSize<u32>,
 
     seed: u64,
+    min_area: u16,
     multisampling: u8,
     anti_aliasing: AntiAliasing,
     intensity: f32,
@@ -206,6 +208,7 @@ impl Clone for AttractorConfig {
             transform: self.transform,
             size: self.size,
             seed: self.seed,
+            min_area: self.min_area,
             multisampling: self.multisampling,
             anti_aliasing: self.anti_aliasing,
             intensity: self.intensity,
@@ -259,7 +262,8 @@ impl AttractorConfig {
     fn set_seed(&mut self, seed: u64) {
         self.seed = seed;
         let rng = rand::rngs::SmallRng::seed_from_u64(seed);
-        let mut attractor = Attractor::find_strange_attractor(rng, 1_000_000).unwrap();
+        let mut attractor =
+            Attractor::find_strange_attractor(rng, self.min_area, u16::MAX, usize::MAX).unwrap();
         let points = attractor.get_points::<512>();
 
         // 4 KiB
@@ -376,6 +380,20 @@ impl AttractorCtx {
         self.clear();
     }
 
+    fn set_min_area(&mut self, min_area: u16) {
+        {
+            let mut config = self.config.lock();
+            config.min_area = min_area;
+
+            let seed = config.seed;
+            config.set_seed(seed);
+
+            self.attractor = config.base_attractor.transform_input(config.transform);
+        };
+
+        self.clear();
+    }
+
     fn set_multisampling(&mut self, multisampling: u8) {
         let size = self.config.lock().size;
         self.resize(size, multisampling);
@@ -417,6 +435,7 @@ fn square_bounds(width: f64, height: f64, border: f64) -> [f64; 4] {
 #[derive(Default)]
 struct GuiState {
     seed_text: String,
+    min_area: u16,
     multisampling: u8,
     anti_aliasing: AntiAliasing,
     intensity: f32,
@@ -528,7 +547,7 @@ fn main() {
         ..GuiState::default()
     };
 
-    update_from_config(&mut gui_state, &attractor_config);
+    update_gui_state_from_config(&mut gui_state, &attractor_config);
 
     let attractor_config = Arc::new(Mutex::new(attractor_config));
 
@@ -543,6 +562,7 @@ fn main() {
             match recv_conf.try_recv() {
                 Ok(mess) => match mess {
                     AttractorMess::SetSeed(seed) => attractor.set_seed(seed),
+                    AttractorMess::SetMinArea(min_area) => attractor.set_min_area(min_area),
                     AttractorMess::SetMultisampling(multisampling) => {
                         attractor.set_multisampling(multisampling)
                     }
@@ -1073,6 +1093,15 @@ fn build_ui(
                 }
             });
 
+            ui.my_field("min area:", |ui| {
+                if ui
+                    .add(Slider::new(&mut gui_state.min_area, 0..=2048))
+                    .changed()
+                {
+                    let _ = attractor_sender.send(AttractorMess::SetMinArea(gui_state.min_area));
+                }
+            });
+
             ui.my_field("multisampling:", |ui| {
                 if ui
                     .add(Slider::new(&mut gui_state.multisampling, 1..=6))
@@ -1455,7 +1484,7 @@ fn build_ui(
                             gui_state.background_color_1,
                             gui_state.background_color_2,
                         );
-                        update_from_config(gui_state, &config);
+                        update_gui_state_from_config(gui_state, &config);
                         drop(config);
                         let _ = attractor_sender.send(AttractorMess::Update);
                         let _ = attractor_sender
@@ -1500,8 +1529,9 @@ fn update_render(
     );
 }
 
-fn update_from_config(gui_state: &mut GuiState, config: &AttractorConfig) {
+fn update_gui_state_from_config(gui_state: &mut GuiState, config: &AttractorConfig) {
     gui_state.seed_text = config.seed.to_string();
+    gui_state.min_area = config.min_area;
     gui_state.multisampling = config.multisampling;
     gui_state.anti_aliasing = config.anti_aliasing;
     gui_state.intensity = config.intensity;

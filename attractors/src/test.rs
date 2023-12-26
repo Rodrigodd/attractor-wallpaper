@@ -9,7 +9,7 @@ use super::*;
 fn test_for_nan() {
     let mut rng = rand::rngs::SmallRng::from_entropy();
     for _ in 0..500 {
-        let Some(a) = Attractor::find_strange_attractor(&mut rng, 1000) else {
+        let Some(a) = Attractor::find_strange_attractor(&mut rng, 0, u16::MAX, 1000) else {
             println!("no attractor found");
             continue;
         };
@@ -24,7 +24,7 @@ fn test_for_nan() {
 #[ignore]
 fn generate_svg_scatter_plot() {
     let rng = rand::rngs::SmallRng::from_entropy();
-    let attractor = Attractor::find_strange_attractor(rng, 1000).unwrap();
+    let attractor = Attractor::find_strange_attractor(rng, 0, u16::MAX, 1000).unwrap();
     let samples = 10_000;
 
     let src_bounds = attractor.get_bounds(100);
@@ -116,7 +116,7 @@ fn stats() {
 #[ignore]
 fn check_period_length() {
     let rng = rand::rngs::SmallRng::from_entropy();
-    let attractor = Attractor::find_strange_attractor(rng, 1000).unwrap();
+    let attractor = Attractor::find_strange_attractor(rng, 0, u16::MAX, 1000).unwrap();
 
     let affine = super::affine_from_pca(&attractor.get_points::<512>());
     let attractor = attractor.transform_input(affine);
@@ -172,7 +172,7 @@ fn noise_estimate_curve() {
     // let mut rng = rand::rngs::SmallRng::seed_from_u64(145);
     let mut rng = rand::rngs::SmallRng::from_entropy();
     let mut attractor = loop {
-        let attractor = Attractor::find_strange_attractor(&mut rng, 1000).unwrap();
+        let attractor = Attractor::find_strange_attractor(&mut rng, 0, u16::MAX, 1000).unwrap();
 
         let affine = super::affine_from_pca(&attractor.get_points::<512>());
         let attractor = attractor.transform_input(affine);
