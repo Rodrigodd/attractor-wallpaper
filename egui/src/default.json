@@ -16,7 +16,7 @@
   "anti_aliasing": "None",
   "intensity": 1.0,
   "random_start": false,
-  "multithreaded": "Single",
+  "multithreading": "Single",
   "samples_per_iteration": 100000,
   "saved_themes": {
     "Cold": {
