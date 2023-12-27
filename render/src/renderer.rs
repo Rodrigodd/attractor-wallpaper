@@ -237,12 +237,10 @@ impl WgpuState {
 
         let (tx, rx) = std::sync::mpsc::channel();
         buffer.slice(..).map_async(wgpu::MapMode::Read, move |_| {
-            println!("map_async");
             tx.send(()).unwrap();
         });
 
         self.device.poll(wgpu::Maintain::Wait);
-        println!("waited for map_async");
         rx.recv().unwrap();
 
         let mut x = buffer.slice(..).get_mapped_range().to_vec();

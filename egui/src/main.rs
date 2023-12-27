@@ -70,15 +70,22 @@ mod cli {
         #[arg(short, long, default_value = "1")]
         pub multisampling: u8,
 
-        /*
         /// Renders in headless mode, and outputs the attractor to the given file.
         #[arg(short, long)]
-        pub output: Option<PathBuf>,
+        pub output: Option<String>,
 
-        /// The dimensions for the rendered attractor, in pixels.
+        /// The dimensions of the spawned window, or the size of the output image in headless mode.
         #[arg(short, long, default_value = "512x512", value_parser = size_value_parser, conflicts_with = "fullscreen")]
         pub dimensions: winit::dpi::PhysicalSize<u32>,
-        */
+
+        /// The number of samples to render for in headless mode.
+        #[arg(short, long, default_value = "10_000_000", value_parser = parse_integer)]
+        pub samples: u64,
+
+        /// If true, sets the outputed image as the wallpaper.
+        #[arg(short, long, requires("output"))]
+        pub set_wallpaper: bool,
+
         /// The name of one of the saved themes to use.
         #[arg(short, long)]
         pub theme: Option<String>,
@@ -100,24 +107,40 @@ mod cli {
         }
     }
 
-    // fn size_value_parser(s: &str) -> Result<winit::dpi::PhysicalSize<u32>, String> {
-    //     let mut parts = s.split('x');
-    //     let width = parts
-    //         .next()
-    //         .ok_or_else(|| "Missing width".to_string())
-    //         .and_then(|s| {
-    //             s.parse::<u32>()
-    //                 .map_err(|err| format!("Invalid width: {}", err))
-    //         })?;
-    //     let height = parts
-    //         .next()
-    //         .ok_or_else(|| "Missing height".to_string())
-    //         .and_then(|s| {
-    //             s.parse::<u32>()
-    //                 .map_err(|err| format!("Invalid height: {}", err))
-    //         })?;
-    //     Ok(winit::dpi::PhysicalSize::new(width, height))
-    // }
+    fn size_value_parser(s: &str) -> Result<winit::dpi::PhysicalSize<u32>, String> {
+        let mut parts = s.split('x');
+        let width = parts
+            .next()
+            .ok_or_else(|| "Missing width".to_string())
+            .and_then(|s| {
+                s.parse::<u32>()
+                    .map_err(|err| format!("Invalid width: {}", err))
+            })?;
+        let height = parts
+            .next()
+            .ok_or_else(|| "Missing height".to_string())
+            .and_then(|s| {
+                s.parse::<u32>()
+                    .map_err(|err| format!("Invalid height: {}", err))
+            })?;
+        Ok(winit::dpi::PhysicalSize::new(width, height))
+    }
+
+    // parse integer with underscores
+    fn parse_integer(s: &str) -> Result<u64, String> {
+        s.chars()
+            .filter(|c| *c != '_')
+            .map(|c| {
+                c.to_digit(10)
+                    .ok_or_else(|| format!("Invalid digit: {}", c))
+            })
+            .try_fold(0u64, |acc, digit| {
+                let digit = digit? as u64;
+                acc.checked_mul(10)
+                    .and_then(|acc| acc.checked_add(digit))
+                    .ok_or_else(|| "Integer overflow".to_string())
+            })
+    }
 }
 
 async fn build_renderer(window: Window, proxy: EventLoopProxy<UserEvent>) {
@@ -281,6 +304,20 @@ impl AttractorConfig {
         self.base_attractor = attractor;
         self.transform = affine;
     }
+
+    fn resize(&mut self, new_size: PhysicalSize<u32>, new_multisampling: u8) {
+        let old_size = self.bitmap_size();
+
+        self.size = new_size;
+        self.multisampling = new_multisampling;
+        let new_size = self.bitmap_size();
+
+        let src = square_bounds(old_size[0] as f64, old_size[1] as f64, BORDER);
+        let dst = square_bounds(new_size[0] as f64, new_size[1] as f64, BORDER);
+        let affine = attractors::map_bounds_affine(dst, src);
+
+        self.transform = affine_affine(affine, self.transform);
+    }
 }
 
 #[derive(Clone)]
@@ -351,19 +388,10 @@ impl AttractorCtx {
         {
             let mut config = self.config.lock();
 
-            let old_size = config.bitmap_size();
+            config.resize(new_size, new_multisampling);
 
-            config.size = new_size;
-            config.multisampling = new_multisampling;
             let new_size = config.bitmap_size();
-
-            let src = square_bounds(old_size[0] as f64, old_size[1] as f64, BORDER);
-            let dst = square_bounds(new_size[0] as f64, new_size[1] as f64, BORDER);
-            let affine = attractors::map_bounds_affine(dst, src);
-
-            config.transform = affine_affine(affine, config.transform);
             self.attractor = config.base_attractor.transform_input(config.transform);
-
             self.bitmap = vec![0i32; new_size[0] * new_size[1]];
             self.total_samples = 0;
         }
@@ -463,7 +491,7 @@ struct GuiState {
     /// - AtomicMulti: Use a bitmap of AtomicI32's that is rendered by multiple threads.
     /// - MergeMulti: Each thread renders to a separate bitmap, that is merged at the end of each
     /// iteration. For a big enough number of samples per iteration, this should be the fastest
-    /// method.
+    /// method, although the one that consumes more memory.
     multithreading: Multithreading,
     /// The number of samples to be generated for each iteration of the attractor. The UI will
     /// block until a the end of a iteration every time the UI is updated/rendered. This value
@@ -507,6 +535,145 @@ impl GuiState {
 fn main() {
     let cli = <cli::Cli as clap::Parser>::parse();
 
+    let json = include_str!("default.json");
+    let mut attractor_config = serde_json::from_str::<AttractorConfig>(json).unwrap();
+
+    {
+        let cli::Cli {
+            fullscreen: _,
+            anti_aliasing,
+            seed,
+            multisampling,
+            output: _,
+            dimensions: _,
+            samples: _,
+            set_wallpaper: _,
+            theme,
+        } = &cli;
+
+        let config = &mut attractor_config;
+
+        config.anti_aliasing = anti_aliasing.into_attractors_antialiasing();
+        if let Some(seed) = seed {
+            config.set_seed(*seed);
+        } else {
+            config.set_seed(rand::random());
+        }
+
+        config.resize(config.size, *multisampling);
+
+        if let Some(name) = theme {
+            if let Some(theme) = config.saved_themes.get(name).cloned() {
+                config.set_theme(name, &theme);
+            } else {
+                eprintln!("Theme {} not found. Avaliable themes are:", name);
+                for name in config.saved_themes.keys() {
+                    eprintln!("  - {}", name);
+                }
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if cli.output.is_some() {
+        return run_headless(attractor_config, cli);
+    }
+
+    run_ui(attractor_config, cli.fullscreen);
+}
+
+fn run_headless(mut config: AttractorConfig, mut cli: cli::Cli) {
+    if cli.fullscreen {
+        let ev = winit::event_loop::EventLoop::new();
+        let monitor = match ev.primary_monitor() {
+            Some(x) => x,
+            None => {
+                let Some(x) = ev.available_monitors().next() else {
+                    println!("ERROR: No monitors found");
+                    std::process::exit(1)
+                };
+                println!("WARN: No primary monitor found, falling back to first avaliable monitor");
+                x
+            }
+        };
+        cli.dimensions = monitor.size();
+    }
+
+    config.samples_per_iteration = cli.samples;
+
+    let output = cli.output.unwrap();
+
+    let multithreaded = config.multithreading;
+    let multisampling = config.multisampling;
+
+    let mut attractor = AttractorCtx::new(Arc::new(Mutex::new(config)));
+
+    attractor.resize(cli.dimensions, multisampling);
+
+    match multithreaded {
+        Multithreading::Single => aggregate_attractor(&mut attractor),
+        Multithreading::AtomicMulti => atomic_par_aggregate_attractor(&mut attractor),
+        Multithreading::MergeMulti => merge_par_aggregate_attractor(&mut attractor),
+    }
+
+    let AttractorCtx {
+        bitmap,
+        total_samples,
+        config,
+        ..
+    } = attractor;
+
+    let config = Arc::try_unwrap(config).unwrap().into_inner();
+
+    let AttractorConfig {
+        size,
+        base_intensity,
+        multisampling,
+        anti_aliasing,
+        gradient,
+        background_color_1,
+        background_color_2,
+        transform: (mat, _),
+        ..
+    } = config;
+
+    pollster::block_on(async move {
+        let bitmap = render_to_bitmap(
+            size,
+            multisampling,
+            bitmap,
+            base_intensity,
+            mat,
+            total_samples,
+            anti_aliasing,
+            gradient,
+            background_color_1,
+            background_color_2,
+        )
+        .await;
+
+        image::save_buffer(
+            &output,
+            &bitmap,
+            size.width,
+            size.height,
+            image::ColorType::Rgba8,
+        )
+        .unwrap();
+
+        if cli.set_wallpaper {
+            // kill swaybg
+            println!("killing swaybg");
+            let _ = std::process::Command::new("killall").arg("swaybg").output();
+
+            println!("setting wallpaper");
+            wallpaper::set_from_path(&output).unwrap();
+            println!("wallpaper set");
+        }
+    });
+}
+
+fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
 
     let size = egui_winit::winit::dpi::PhysicalSize::<u32>::new(800, 600);
@@ -517,7 +684,7 @@ fn main() {
 
     let wb = { wb.with_name("dev", "") };
 
-    let wb = if cli.fullscreen {
+    let wb = if fullscreen {
         wb.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)))
     } else {
         wb
@@ -539,41 +706,6 @@ fn main() {
 
     let mut last_noise = 0.0;
     let mut exp_moving_avg = 0.0;
-
-    let json = include_str!("default.json");
-    let mut attractor_config = serde_json::from_str::<AttractorConfig>(json).unwrap();
-
-    {
-        let cli::Cli {
-            fullscreen: _,
-            anti_aliasing,
-            seed,
-            multisampling,
-            // output: _,
-            // dimensions: _,
-            theme,
-        } = cli;
-
-        let config = &mut attractor_config;
-
-        config.anti_aliasing = anti_aliasing.into_attractors_antialiasing();
-        if let Some(seed) = seed {
-            config.set_seed(seed);
-        }
-        config.multisampling = multisampling;
-
-        if let Some(name) = theme {
-            if let Some(theme) = config.saved_themes.get(&name).cloned() {
-                config.set_theme(&name, &theme);
-            } else {
-                eprintln!("Theme {} not found. Avaliable themes are:", name);
-                for name in config.saved_themes.keys() {
-                    eprintln!("  - {}", name);
-                }
-                std::process::exit(1);
-            }
-        }
-    }
 
     let mut gui_state = GuiState {
         total_samples_text: 10_000_000.to_string(),
@@ -1419,7 +1551,7 @@ fn build_ui(
                 let wallpaper_handle = gui_state.wallpaper_thread.take().unwrap();
 
                 let AttractorCtx {
-                    mut bitmap,
+                    bitmap,
                     total_samples,
                     config,
                     ..
@@ -1440,37 +1572,19 @@ fn build_ui(
                 } = config;
 
                 let task = async move {
-                    let wgpu_state = WgpuState::new_headless().await.unwrap();
-                    let mut attractor_renderer = AttractorRenderer::new(
-                        &wgpu_state.device,
+                    let bitmap = render_to_bitmap(
                         size,
-                        wgpu::TextureFormat::Rgba8UnormSrgb,
                         multisampling,
-                    )
-                    .unwrap();
-
-                    bitmap[0] = render::get_intensity(
-                        base_intensity as f32,
+                        bitmap,
+                        base_intensity,
                         mat,
                         total_samples,
                         anti_aliasing,
-                    );
-                    attractor_renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
-
-                    update_render(
-                        &mut attractor_renderer,
-                        &wgpu_state,
-                        &gradient,
-                        multisampling,
+                        gradient,
                         background_color_1,
                         background_color_2,
-                    );
-
-                    let texture = wgpu_state.new_target_texture(size);
-                    let view = texture.create_view(&Default::default());
-                    attractor_renderer.render(&wgpu_state.device, &wgpu_state.queue, &view);
-
-                    let bitmap = wgpu_state.copy_texture_content(texture);
+                    )
+                    .await;
 
                     let path = "wallpaper.png";
 
@@ -1546,6 +1660,47 @@ fn build_ui(
             }
         });
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn render_to_bitmap(
+    size: PhysicalSize<u32>,
+    multisampling: u8,
+    mut bitmap: Vec<i32>,
+    base_intensity: i16,
+    mat: [f64; 4],
+    total_samples: u64,
+    anti_aliasing: AntiAliasing,
+    gradient: Gradient<Oklab>,
+    background_color_1: OkLch,
+    background_color_2: OkLch,
+) -> Vec<u8> {
+    let wgpu_state = WgpuState::new_headless().await.unwrap();
+    let mut attractor_renderer = AttractorRenderer::new(
+        &wgpu_state.device,
+        size,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        multisampling,
+    )
+    .unwrap();
+
+    bitmap[0] = render::get_intensity(base_intensity as f32, mat, total_samples, anti_aliasing);
+    attractor_renderer.load_aggragate_buffer(&wgpu_state.queue, &bitmap);
+
+    update_render(
+        &mut attractor_renderer,
+        &wgpu_state,
+        &gradient,
+        multisampling,
+        background_color_1,
+        background_color_2,
+    );
+
+    let texture = wgpu_state.new_target_texture(size);
+    let view = texture.create_view(&Default::default());
+    attractor_renderer.render(&wgpu_state.device, &wgpu_state.queue, &view);
+
+    wgpu_state.copy_texture_content(texture)
 }
 
 fn update_render(
