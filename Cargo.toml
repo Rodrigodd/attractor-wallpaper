@@ -1,6 +1,12 @@
 [workspace]
 
-members = ["attractors", "render", "egui", "oklab"]
+members = [
+    "attractors",
+    "render",
+    "egui",
+    "oklab",
+    "winit-executor",
+]
 resolver = "2"
 
 [profile.dev.package."*"]

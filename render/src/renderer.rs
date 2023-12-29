@@ -1,7 +1,8 @@
 use std::error::Error;
 
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use wgpu::{
+    util::{BufferInitDescriptor, DeviceExt},
     Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingType, BlendState, Color, ColorTargetState, ColorWrites,
     CommandEncoderDescriptor, Device, DeviceDescriptor, Face, Features, FragmentState, FrontFace,
@@ -11,21 +12,20 @@ use wgpu::{
     RenderPipelineDescriptor, RequestAdapterOptions, ShaderModuleDescriptor, ShaderSource,
     ShaderStages, Surface, SurfaceConfiguration, TextureUsages, VertexState,
 };
-use winit::window::Window;
 
-pub struct SurfaceState {
+pub struct SurfaceState<W: HasRawWindowHandle + HasRawDisplayHandle> {
     surface: Surface,
     // SAFETY: window must come after surface, because surface must be dropped before window.
-    window: Window,
+    window: W,
     config: SurfaceConfiguration,
 }
-impl SurfaceState {
-    fn new(window: Window, instance: &Instance) -> Self {
+impl<W: HasRawWindowHandle + HasRawDisplayHandle> SurfaceState<W> {
+    fn new(window: W, size: (u32, u32), instance: &Instance) -> Self {
         let config = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            width: window.inner_size().width,
-            height: window.inner_size().height,
+            width: size.0,
+            height: size.1,
             present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
@@ -39,18 +39,15 @@ impl SurfaceState {
         }
     }
 
-    pub fn size(&self) -> winit::dpi::PhysicalSize<u32> {
-        winit::dpi::PhysicalSize {
-            width: self.config.width,
-            height: self.config.height,
-        }
+    pub fn size(&self) -> (u32, u32) {
+        (self.config.width, self.config.height)
     }
 
     pub fn texture_format(&self) -> wgpu::TextureFormat {
         self.config.format
     }
 
-    fn set_configuration(&mut self, adapter: &wgpu::Adapter, device: &Device) {
+    fn set_configuration(&mut self, size: (u32, u32), adapter: &wgpu::Adapter, device: &Device) {
         let surface_caps = self.surface.get_capabilities(adapter);
 
         let surface_format = surface_caps
@@ -63,8 +60,8 @@ impl SurfaceState {
         self.config = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
-            width: self.window.inner_size().width,
-            height: self.window.inner_size().height,
+            width: size.0,
+            height: size.1,
             present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
@@ -72,18 +69,18 @@ impl SurfaceState {
         self.surface.configure(device, &self.config);
     }
 
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>, device: &Device) {
-        self.config.width = new_size.width;
-        self.config.height = new_size.height;
+    pub fn resize(&mut self, new_size: (u32, u32), device: &Device) {
+        self.config.width = new_size.0;
+        self.config.height = new_size.1;
 
         self.surface.configure(device, &self.config);
     }
 
-    pub fn destroy(self) -> Window {
+    pub fn destroy(self) -> W {
         self.window
     }
 
-    pub fn window(&self) -> &Window {
+    pub fn window(&self) -> &W {
         &self.window
     }
 
@@ -98,28 +95,39 @@ pub struct WgpuState {
     pub queue: Queue,
 }
 impl WgpuState {
-    pub async fn new_windowed(window: Window) -> Result<(Self, SurfaceState), Box<dyn Error>> {
-        Self::new(Some(window))
+    pub async fn new_windowed<W: HasRawWindowHandle + HasRawDisplayHandle>(
+        window: W,
+        size: (u32, u32),
+    ) -> Result<(Self, SurfaceState<W>), Box<dyn Error>> {
+        Self::new(Some((window, size)))
             .await
             .map(|(renderer, surface)| (renderer, surface.unwrap()))
     }
 
     pub async fn new_headless() -> Result<Self, Box<dyn Error>> {
-        Self::new(None).await.map(|(renderer, surface)| {
-            assert!(surface.is_none());
-            renderer
-        })
+        // TODO: This could be replace with the never type (`!`), when it stabilizes.
+        trait HeadlessTrait: HasRawWindowHandle + HasRawDisplayHandle {}
+        type Headless = &'static dyn HeadlessTrait;
+
+        Self::new(None::<(Headless, _)>)
+            .await
+            .map(|(renderer, surface)| {
+                assert!(surface.is_none());
+                renderer
+            })
     }
 
-    async fn new(window: Option<Window>) -> Result<(Self, Option<SurfaceState>), Box<dyn Error>> {
+    async fn new<W: HasRawWindowHandle + HasRawDisplayHandle>(
+        window: Option<(W, (u32, u32))>,
+    ) -> Result<(Self, Option<SurfaceState<W>>), Box<dyn Error>> {
         let instance = Instance::new(InstanceDescriptor {
             // backends: Backends::all(),
             backends: Backends::GL,
             dx12_shader_compiler: Default::default(),
         });
 
-        let (mut surface, adapter) = if let Some(window) = window {
-            let surface = SurfaceState::new(window, &instance);
+        let (mut surface, adapter) = if let Some((window, size)) = window {
+            let surface = SurfaceState::new(window, size, &instance);
 
             let adapter = instance
                 .request_adapter(&RequestAdapterOptions {
@@ -130,7 +138,7 @@ impl WgpuState {
                 .await
                 .unwrap();
 
-            (Some(surface), adapter)
+            (Some((surface, size)), adapter)
         } else {
             let adapter = instance
                 .request_adapter(&RequestAdapterOptions {
@@ -160,8 +168,8 @@ impl WgpuState {
             )
             .await?;
 
-        if let Some(surface) = surface.as_mut() {
-            surface.set_configuration(&adapter, &device);
+        if let Some((surface, size)) = surface.as_mut() {
+            surface.set_configuration(*size, &adapter, &device);
         }
 
         let wgpu_state = Self {
@@ -170,15 +178,15 @@ impl WgpuState {
             queue,
         };
 
-        Ok((wgpu_state, surface))
+        Ok((wgpu_state, surface.map(|x| x.0)))
     }
 
-    pub fn new_target_texture(&self, dimensions: winit::dpi::PhysicalSize<u32>) -> wgpu::Texture {
+    pub fn new_target_texture(&self, dimensions: (u32, u32)) -> wgpu::Texture {
         self.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
-                width: dimensions.width,
-                height: dimensions.height,
+                width: dimensions.0,
+                height: dimensions.1,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -258,7 +266,7 @@ impl WgpuState {
 }
 
 pub struct AttractorRenderer {
-    pub size: winit::dpi::PhysicalSize<u32>,
+    pub size: (u32, u32),
     pub multisampling: u8,
     output_format: wgpu::TextureFormat,
     render_pipeline: RenderPipeline,
@@ -272,15 +280,15 @@ pub struct AttractorRenderer {
 impl AttractorRenderer {
     pub fn new(
         device: &Device,
-        size: winit::dpi::PhysicalSize<u32>,
+        size: (u32, u32),
         output_format: wgpu::TextureFormat,
         multisampling: u8,
     ) -> Result<Self, Box<dyn Error>> {
         let aggregate_buffer = gen_aggreate_buffer(device, size, multisampling);
 
         let uniforms = Uniforms {
-            screen_width: size.width,
-            screen_height: size.height,
+            screen_width: size.0,
+            screen_height: size.1,
             _padding: [0; 8],
             bg_color_1: [0.012, 0.0, 0.0, 1.0],
             bg_color_2: [0.004, 0.0, 0.0, 1.0],
@@ -357,7 +365,7 @@ impl AttractorRenderer {
     pub fn recreate_aggregate_buffer(
         &mut self,
         device: &Device,
-        size: winit::dpi::PhysicalSize<u32>,
+        size: (u32, u32),
         multisampling: u8,
     ) {
         if self.size == size && self.multisampling == multisampling {
@@ -387,8 +395,8 @@ impl AttractorRenderer {
         }
     }
 
-    pub fn resize(&mut self, device: &Device, new_size: winit::dpi::PhysicalSize<u32>) {
-        if new_size.width == 0 && new_size.height == 0 {
+    pub fn resize(&mut self, device: &Device, new_size: (u32, u32)) {
+        if new_size.0 == 0 && new_size.1 == 0 {
             return;
         }
 
@@ -441,8 +449,8 @@ impl AttractorRenderer {
     pub fn update_uniforms(&mut self, queue: &Queue) {
         assert!({
             let x = Uniforms {
-                screen_width: self.size.width,
-                screen_height: self.size.height,
+                screen_width: self.size.0,
+                screen_height: self.size.1,
                 ..Default::default()
             };
             (&x as *const Uniforms as usize) == (&x.screen_width as *const u32 as usize)
@@ -452,7 +460,7 @@ impl AttractorRenderer {
         queue.write_buffer(
             &self.uniforms_buffer,
             0,
-            bytemuck::cast_slice(&[self.size.width, self.size.height]),
+            bytemuck::cast_slice(&[self.size.0, self.size.1]),
         );
     }
 
@@ -493,16 +501,12 @@ impl AttractorRenderer {
     }
 }
 
-fn gen_aggreate_buffer(
-    device: &Device,
-    size: winit::dpi::PhysicalSize<u32>,
-    multisampling: u8,
-) -> wgpu::Buffer {
+fn gen_aggreate_buffer(device: &Device, size: (u32, u32), multisampling: u8) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
-        size: size.width as u64
+        size: size.0 as u64
             * multisampling as u64
-            * size.height as u64
+            * size.1 as u64
             * multisampling as u64
             * std::mem::size_of::<u32>() as u64,
         usage: wgpu::BufferUsages::STORAGE

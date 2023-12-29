@@ -1,10 +1,6 @@
-mod executor;
 mod renderer;
 
-pub use crate::{
-    executor::{TaskId, WinitExecutor},
-    renderer::{AttractorRenderer, SurfaceState, WgpuState},
-};
+pub use crate::renderer::{AttractorRenderer, SurfaceState, WgpuState};
 
 pub fn get_intensity(
     base_intensity: f32,

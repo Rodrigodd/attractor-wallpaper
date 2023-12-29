@@ -20,8 +20,9 @@ use oklab::{LinSrgb, OkLch, Oklab};
 use parking_lot::Mutex;
 use rand::prelude::*;
 
-use render::{AttractorRenderer, SurfaceState, TaskId, WgpuState, WinitExecutor};
+use render::{AttractorRenderer, SurfaceState, WgpuState};
 use winit::event::{KeyboardInput, ModifiersState, VirtualKeyCode};
+use winit_executor::{TaskId, WinitExecutor};
 
 use crate::widgets::ok_picker::ToColor32;
 
@@ -79,11 +80,11 @@ mod cli {
         pub dimensions: winit::dpi::PhysicalSize<u32>,
 
         /// The number of samples to render for in headless mode.
-        #[arg(short, long, default_value = "10_000_000", value_parser = parse_integer)]
+        #[arg(long, default_value = "10_000_000", value_parser = parse_integer)]
         pub samples: u64,
 
         /// If true, sets the outputed image as the wallpaper.
-        #[arg(short, long, requires("output"))]
+        #[arg(long, requires("output"))]
         pub set_wallpaper: bool,
 
         /// The name of one of the saved themes to use.
@@ -144,7 +145,10 @@ mod cli {
 }
 
 async fn build_renderer(window: Window, proxy: EventLoopProxy<UserEvent>) {
-    let (wgpu_state, surface) = render::WgpuState::new_windowed(window).await.unwrap();
+    let size = window.inner_size();
+    let (wgpu_state, surface) = render::WgpuState::new_windowed(window, (size.width, size.height))
+        .await
+        .unwrap();
     let attractor_renderer = AttractorRenderer::new(
         &wgpu_state.device,
         surface.size(),
@@ -168,7 +172,7 @@ enum UserEvent {
     BuildRenderer(
         (
             WgpuState,
-            SurfaceState,
+            SurfaceState<Window>,
             AttractorRenderer,
             egui_wgpu::Renderer,
         ),
@@ -178,7 +182,7 @@ enum UserEvent {
 
 struct RenderState {
     wgpu_state: WgpuState,
-    surface: SurfaceState,
+    surface: SurfaceState<Window>,
     attractor_renderer: AttractorRenderer,
     egui_renderer: egui_wgpu::Renderer,
 }
@@ -557,7 +561,7 @@ fn main() {
         if let Some(seed) = seed {
             config.set_seed(*seed);
         } else {
-            config.set_seed(rand::random());
+            config.set_seed(rand::random::<u64>() % 1_000_000);
         }
 
         config.resize(config.size, *multisampling);
@@ -913,8 +917,8 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                             let _ = attractor_sender.send(AttractorMess::Transform((mat, trans)));
                         } else if gui_state.rotating {
                             let size = render_state.surface.size();
-                            let cx = size.width as f64 / 2.0;
-                            let cy = size.height as f64 / 2.0;
+                            let cx = size.0 as f64 / 2.0;
+                            let cy = size.1 as f64 / 2.0;
 
                             let ldx = gui_state.last_cursor_position.y - cy;
                             let ldy = gui_state.last_cursor_position.x - cx;
@@ -964,6 +968,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                     WindowEvent::Resized(new_size) => {
                         let _ = attractor_sender.send(AttractorMess::Resize(new_size));
 
+                        let new_size = (new_size.width, new_size.height);
                         render_state
                             .attractor_renderer
                             .resize(&render_state.wgpu_state.device, new_size);
@@ -980,8 +985,8 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                 recv_bitmap.recv(|at| {
                     let rsize = render_state.attractor_renderer.size;
                     let rsize = [
-                        rsize.width * render_state.attractor_renderer.multisampling as u32,
-                        rsize.height * render_state.attractor_renderer.multisampling as u32,
+                        rsize.0 * render_state.attractor_renderer.multisampling as u32,
+                        rsize.1 * render_state.attractor_renderer.multisampling as u32,
                     ];
                     let config = at.config.lock();
                     let [width, height] = config.bitmap_size();
@@ -1651,8 +1656,12 @@ fn build_ui(
                         update_gui_state_from_config(gui_state, &config);
                         drop(config);
                         let _ = attractor_sender.send(AttractorMess::Update);
-                        let _ = attractor_sender
-                            .send(AttractorMess::Resize(render_state.surface.size()));
+                        let size = render_state.surface.size();
+                        let size = PhysicalSize {
+                            width: size.0,
+                            height: size.1,
+                        };
+                        let _ = attractor_sender.send(AttractorMess::Resize(size));
                         attractor_recv.recv(|_| {});
                     }
                     _ => println!("could not open config.json"),
@@ -1678,7 +1687,7 @@ async fn render_to_bitmap(
     let wgpu_state = WgpuState::new_headless().await.unwrap();
     let mut attractor_renderer = AttractorRenderer::new(
         &wgpu_state.device,
-        size,
+        (size.width, size.height),
         wgpu::TextureFormat::Rgba8UnormSrgb,
         multisampling,
     )
@@ -1696,7 +1705,7 @@ async fn render_to_bitmap(
         background_color_2,
     );
 
-    let texture = wgpu_state.new_target_texture(size);
+    let texture = wgpu_state.new_target_texture((size.width, size.height));
     let view = texture.create_view(&Default::default());
     attractor_renderer.render(&wgpu_state.device, &wgpu_state.queue, &view);
 
@@ -1775,10 +1784,7 @@ fn render_frame(
         label: Some("Render Encoder"),
     });
     let screen_descriptor = egui_wgpu::renderer::ScreenDescriptor {
-        size_in_pixels: [
-            render_state.surface.size().width,
-            render_state.surface.size().height,
-        ],
+        size_in_pixels: [render_state.surface.size().0, render_state.surface.size().1],
         pixels_per_point: 1.0,
     };
     render_state.attractor_renderer.update_uniforms(queue);
