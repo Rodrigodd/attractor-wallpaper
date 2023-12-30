@@ -124,6 +124,8 @@ impl WgpuState {
             // backends: Backends::all(),
             backends: Backends::GL,
             dx12_shader_compiler: Default::default(),
+            flags: wgpu::InstanceFlags::debugging(),
+            gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
         });
 
         let (mut surface, adapter) = if let Some((window, size)) = window {
@@ -156,10 +158,18 @@ impl WgpuState {
             .request_device(
                 &DeviceDescriptor {
                     features: Features::empty(),
-                    limits: if cfg!(target_arch = "wasm32") {
-                        Limits::downlevel_webgl2_defaults()
-                    } else {
-                        Limits::default()
+                    limits: Limits {
+                        // My android device only supports 128 for workgroup_size_y, smaller than
+                        // the default 256. But I am not using compute shaders anyway, so keep
+                        // everthing as 0 for now.
+                        max_compute_workgroup_storage_size: 0,
+                        max_compute_invocations_per_workgroup: 0,
+                        max_compute_workgroup_size_x: 0,
+                        max_compute_workgroup_size_y: 0,
+                        max_compute_workgroup_size_z: 0,
+                        max_compute_workgroups_per_dimension: 0,
+
+                        ..Limits::downlevel_defaults()
                     },
                     // limits: Limits::downlevel_webgl2_defaults(),
                     label: None,
@@ -306,12 +316,12 @@ impl AttractorRenderer {
         });
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: None,
+            label: Some("attractor_frag_bind_group_layout"),
             entries: &[
                 // uniform
                 BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStages::COMPUTE | ShaderStages::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -322,9 +332,9 @@ impl AttractorRenderer {
                 // aggregate_buffer
                 BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: ShaderStages::COMPUTE | ShaderStages::FRAGMENT,
+                    visibility: ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -426,10 +436,11 @@ impl AttractorRenderer {
                     resolve_target: None,
                     ops: Operations {
                         load: LoadOp::Clear(Color::BLACK),
-                        store: true,
+                        store: wgpu::StoreOp::Store,
                     },
                 })],
                 depth_stencil_attachment: None,
+                ..Default::default()
             });
 
             self.render_aggregate_buffer(&mut render_pass);
@@ -736,7 +747,7 @@ fn create_render_pipeline(
     });
 
     let render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-        label: Some("Shader"),
+        label: Some("attractor_shader"),
         layout: Some(pipeline_layout),
         vertex: VertexState {
             module: &shader,

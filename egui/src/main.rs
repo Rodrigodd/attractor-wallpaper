@@ -700,7 +700,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
 
     let mut executor = WinitExecutor::new(event_loop.create_proxy(), UserEvent::PollTask);
 
-    let mut egui_state = egui_winit::State::new(&window);
+    let mut egui_state = egui_winit::State::new(egui::ViewportId::ROOT, &window, None, None);
 
     let task = build_renderer(window, event_loop.create_proxy());
     executor.spawn(task);
@@ -836,7 +836,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
 
         match event {
             Event::WindowEvent { event, window_id } if window_id == window.id() => {
-                let res = egui_state.on_event(&egui_ctx, &event);
+                let res = egui_state.on_window_event(&egui_ctx, &event);
 
                 if res.repaint {
                     window.request_redraw();
@@ -1059,7 +1059,11 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                 });
 
                 let window = render_state.surface.window();
-                if full_output.repaint_after == Duration::ZERO {
+                let view_output = full_output
+                    .viewport_output
+                    .get(&egui::ViewportId::ROOT)
+                    .unwrap();
+                if view_output.repaint_delay == Duration::ZERO {
                     window.request_redraw();
                 }
 
@@ -1764,7 +1768,7 @@ fn render_frame(
     full_output: egui::FullOutput,
     render_state: &mut RenderState,
 ) {
-    let paint_jobs = egui_ctx.tessellate(full_output.shapes);
+    let paint_jobs = egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
     let queue = &render_state.wgpu_state.queue;
     let device = &render_state.wgpu_state.device;
     for (id, image_delta) in &full_output.textures_delta.set {
@@ -1802,10 +1806,11 @@ fn render_frame(
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                store: true,
+                store: wgpu::StoreOp::Store,
             },
         })],
         depth_stencil_attachment: None,
+        ..Default::default()
     });
     render_state
         .attractor_renderer
