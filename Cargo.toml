@@ -4,6 +4,7 @@ members = [
     "attractors",
     "render",
     "egui",
+    "android/lib",
     "oklab",
     "winit-executor",
 ]

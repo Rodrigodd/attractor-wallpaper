@@ -1,0 +1,24 @@
+[package]
+name = "attractor-android"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "attractor_android"
+crate-type = ["cdylib"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+android_logger = "0.13.3"
+attractors = { version = "0.1.0", path = "../../attractors" }
+jni = "0.21.1"
+log = "0.4.20"
+ndk = { version = "0.8.0", features = ["rwh_05"] }
+oklab = { version = "0.1.0", path = "../../oklab" }
+parking_lot = "0.12.1"
+pollster = "0.3.0"
+rand = { version = "0.8.5", features = ["small_rng"] }
+raw-window-handle = "0.5.0"
+render = { version = "0.1.0", path = "../../render" }
+wgpu = "0.18.0"

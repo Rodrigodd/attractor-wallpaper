@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">Attractor Wallpaper</string>
+    <string name="settings">Settings</string>
+
+
+    <string name="pref_set_wallpaper">Set as Wallpaper</string>
+    <string name="prefs_quality">Quality</string>
+    <string name="prefs_intensity">Intensity</string>
+    <string name="prefs_multisampling">Multisampling</string>
+    <string name="prefs_attractor">Attractor</string>
+    <string name="prefs_seed">Seed</string>
+</resources>

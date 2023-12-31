@@ -1,0 +1,42 @@
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <Preference
+        app:title="@string/pref_set_wallpaper"
+        app:key="set_wallpaper_button" />
+
+    <PreferenceCategory app:title="@string/prefs_attractor">
+        <EditTextPreference
+            android:visibility="visible"
+            android:digits="0123456789"
+            android:inputType="number"
+            app:key="update_freq"
+            app:defaultValue="1000"
+            app:title="@string/prefs_seed" />
+        <!--            app:summary="@string/pref_update_freq_sum"-->
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/prefs_quality">
+
+        <SeekBarPreference
+            app:defaultValue="100"
+            app:min="0"
+            android:max="400"
+            app:key="intensity"
+            app:title="@string/prefs_intensity"
+            app:showSeekBarValue="false"
+            app:updatesContinuously="true" />
+
+        <SeekBarPreference
+            app:defaultValue="1"
+            app:min="1"
+            android:max="4"
+            app:key="multisampling"
+            app:title="@string/prefs_multisampling"
+            app:showSeekBarValue="false"
+            app:updatesContinuously="true" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>
