@@ -20,10 +20,9 @@ use parking_lot::Mutex;
 use rand::prelude::*;
 
 use render::{
-    aggregate_attractor_single_thread, aggregate_buffer, atomic_par_aggregate_attractor,
-    attractor_thread, gradient::Gradient, merge_par_aggregate_attractor, update_render,
-    AttractorConfig, AttractorCtx, AttractorMess, AttractorRenderer, Multithreading, SavedThemes,
-    SurfaceState, Theme, WgpuState,
+    aggregate_buffer, attractor_thread, gradient::Gradient, update_render, AttractorConfig,
+    AttractorCtx, AttractorMess, AttractorRenderer, Multithreading, SavedThemes, SurfaceState,
+    Theme, WgpuState,
 };
 use winit::event::{KeyboardInput, ModifiersState, VirtualKeyCode};
 use winit_executor::{TaskId, WinitExecutor};

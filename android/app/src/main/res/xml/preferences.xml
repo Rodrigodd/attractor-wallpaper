@@ -10,7 +10,7 @@
             android:visibility="visible"
             android:digits="0123456789"
             android:inputType="number"
-            app:key="update_freq"
+            app:key="seed"
             app:defaultValue="1000"
             app:title="@string/prefs_seed" />
         <!--            app:summary="@string/pref_update_freq_sum"-->

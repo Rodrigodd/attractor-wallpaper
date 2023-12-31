@@ -1,15 +1,15 @@
 package io.github.rodrigodd.attractorwallpaper
 
 import android.content.Context
-import android.graphics.BlendMode
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.PorterDuff
 import android.util.AttributeSet
 import android.util.Log
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import androidx.preference.PreferenceManager
 
 class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
     init {
@@ -42,6 +42,10 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
     );
 
     private external fun nativeSurfaceDestroyed(ctx: Long, surface: Surface);
+
+    private external fun nativeSurfaceRedrawNeeded(ctx: Long, surface: Surface);
+
+    private external fun nativeUpdateConfigInt(ctx: Long, key: String, value: Int);
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         Log.i("AttractorSurfaceView", "surfaceCreated")
@@ -81,7 +85,78 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
 
     override fun surfaceRedrawNeeded(holder: SurfaceHolder) {
         Log.d(TAG, "surfaceRedrawNeeded")
-        //setBackgroundColors(Color.BLUE)
+        if (nativeCtx == 0L) return
+        nativeSurfaceRedrawNeeded(nativeCtx, holder.surface)
+    }
+
+    var downTouch = false
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        super.onTouchEvent(event)
+
+        // Listening for the down and up touch events.
+        return when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                downTouch = true
+                true
+            }
+
+            MotionEvent.ACTION_UP -> if (downTouch) {
+                val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+
+                Log.d(TAG, "onClick")
+                if (nativeCtx != 0L) {
+                    var seed = prefs.getString("seed", "0")?.toLong() ?: 0
+
+                    if (event.x > width / 2) {
+                        Log.d(TAG, "increment seed")
+                        seed += 1
+                    } else {
+                        Log.d(TAG, "decrement seed")
+                        seed -= 1
+                    }
+
+                    prefs.edit().putString("seed", seed.toString()).apply()
+                }
+
+                downTouch = false
+                performClick()
+                true
+            } else {
+                false
+            }
+
+            else -> false  // Return false for other touch events.
+        }
+    }
+
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+
+        prefs.registerOnSharedPreferenceChangeListener { pref, key ->
+            Log.d(TAG, "onSharedPreferenceChanged: $key")
+            if (nativeCtx == 0L) return@registerOnSharedPreferenceChangeListener
+
+            when (key) {
+                "multisampling" -> {
+                    val value = pref.getInt(key, 1)
+                    nativeUpdateConfigInt(nativeCtx, key, value)
+                }
+
+                "seed" -> {
+                    val value = pref.getString("seed", "0")?.toLong() ?: 0
+                    nativeUpdateConfigInt(nativeCtx, key, value.toInt())
+                }
+
+                "intensity" -> {
+                    val value = pref.getInt(key, 100)
+                    nativeUpdateConfigInt(nativeCtx, key, value)
+                }
+            }
+        }
     }
 
     constructor(context: Context?) : super(context)
@@ -91,13 +166,6 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
         attrs,
         defStyleAttr
     )
-
-    constructor(
-        context: Context?,
-        attrs: AttributeSet?,
-        defStyleAttr: Int,
-        defStyleRes: Int
-    ) : super(context, attrs, defStyleAttr, defStyleRes)
 
 
 }

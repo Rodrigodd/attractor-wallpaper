@@ -7,13 +7,19 @@ use render::{
     WgpuState,
 };
 
-use std::error::Error;
-use std::ops;
-use std::sync::mpsc::{Receiver, TryRecvError};
-use std::sync::Arc;
-use std::time::Instant;
+use std::{
+    error::Error,
+    ops,
+    sync::{
+        mpsc::{Receiver, TryRecvError},
+        Arc,
+    },
+    time::Instant,
+};
 
 use parking_lot::Mutex;
+
+mod bindings;
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -56,90 +62,10 @@ fn set_panic_hook() {
     }))
 }
 
-mod bindings {
-    use jni::{
-        objects::{JClass, JObject},
-        sys::{jint, jlong},
-        JNIEnv,
-    };
-
-    // JNI binding to io.github.rodrigodd.attractorwallpaper.AttractorSurfaceView#nativeSurfaceCreated(surface: Surface): Long
-    #[no_mangle]
-    pub extern "system" fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurfaceView_nativeSurfaceCreated(
-        env: JNIEnv,
-        _: JClass,
-        surface: JObject,
-    ) -> jlong {
-        super::init();
-        log::info!("nativeSurfaceCreated: {:?}", surface);
-
-        let window = unsafe {
-            ndk::native_window::NativeWindow::from_surface(
-                env.get_native_interface(),
-                surface.as_raw(),
-            )
-        };
-
-        let Some(window) = window else {
-            return 0;
-        };
-
-        let ctx = super::on_create(super::NativeWindow(window));
-
-        let ctx = match ctx {
-            Ok(ctx) => ctx,
-            Err(err) => {
-                log::error!("Failed to create context: {:?}", err);
-                return 0;
-            }
-        };
-
-        let ptr = Box::into_raw(ctx);
-
-        log::debug!("nativeSurfaceCreated: {:p} {:?}", ptr, surface);
-
-        ptr as usize as i64
-    }
-
-    // JNI binding to io.github.rodrigodd.attractorwallpaper.AttractorSurfaceView#nativeSurfaceChanged(ctx: Long, surface: Surface, format: int, width: int, height: int)
-    #[no_mangle]
-    pub extern "system" fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurfaceView_nativeSurfaceChanged(
-        _env: JNIEnv,
-        _: JClass,
-        ctx: jlong,
-        surface: JObject,
-        format: jint,
-        width: jint,
-        height: jint,
-    ) {
-        let ctx = ctx as *mut super::Context;
-        log::info!(
-            "nativeSurfaceChanged: {:p} {:?} {} {} {}",
-            ctx,
-            surface,
-            format,
-            width,
-            height
-        );
-        unsafe {
-            super::on_resize(&mut *ctx, width, height);
-        }
-    }
-
-    // JNI binding to io.github.rodrigodd.attractorwallpaper.AttractorSurfaceView#nativeSurfaceDestroyed(ctx: Long, surface: Surface)
-    #[no_mangle]
-    pub extern "system" fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurfaceView_nativeSurfaceDestroyed(
-        _env: JNIEnv,
-        _: JClass,
-        ctx: jlong,
-        surface: JObject,
-    ) {
-        let ctx = ctx as *mut super::Context;
-        log::info!("nativeSurfaceDestroyed: {:p} {:?}", ctx, surface,);
-        unsafe {
-            super::on_destroy(Box::from_raw(ctx));
-        }
-    }
+enum ConfigKey {
+    Seed(u64),
+    Multisampling(u8),
+    Intensity(f32),
 }
 
 enum Event {
@@ -147,6 +73,7 @@ enum Event {
     Resized((u32, u32)),
     Destroyed,
     Redraw,
+    UpdateConfig(ConfigKey),
 }
 
 struct Context {
@@ -161,20 +88,39 @@ fn on_create(window: NativeWindow) -> Result<Box<Context>, Box<dyn Error>> {
 
     let thread = std::thread::spawn(|| main_loop(render_state, receiver));
 
-    sender.send(Event::Created).expect("channel");
+    sender.send(Event::Created).expect("event channel");
     Ok(Box::new(Context { thread, sender }))
 }
 
 fn on_resize(ctx: &mut Context, width: i32, height: i32) {
     ctx.sender
         .send(Event::Resized((width as u32, height as u32)))
-        .expect("channel");
-    ctx.sender.send(Event::Redraw).expect("channel");
+        .expect("event channel");
+    ctx.sender.send(Event::Redraw).expect("event channel");
 }
 
 fn on_destroy(ctx: Box<Context>) {
-    ctx.sender.send(Event::Destroyed).expect("channel");
-    ctx.thread.join().expect("channel");
+    ctx.sender.send(Event::Destroyed).expect("event channel");
+    ctx.thread.join().expect("event channel");
+}
+
+fn on_redraw(ctx: &mut Context) {
+    ctx.sender.send(Event::Redraw).expect("event channel");
+}
+
+fn on_update_config_int(ctx: &mut Context, key: &str, value: i32) {
+    let config_key = match key {
+        "seed" => ConfigKey::Seed(value as u64),
+        "multisampling" => ConfigKey::Multisampling(value as u8),
+        "intensity" => ConfigKey::Intensity(value as f32 / 100.0),
+        _ => {
+            log::error!("unknown config key: {}", key);
+            return;
+        }
+    };
+    ctx.sender
+        .send(Event::UpdateConfig(config_key))
+        .expect("event channel");
 }
 
 fn main_loop(mut render_state: RenderState, events: Receiver<Event>) {
@@ -219,6 +165,7 @@ fn main_loop(mut render_state: RenderState, events: Receiver<Event>) {
     std::thread::spawn(move || render::attractor_thread(recv_conf, attractor, sender_bitmap));
 
     let mut redraw = false;
+
     loop {
         let event = match events.try_recv() {
             Ok(event) => event,
@@ -249,6 +196,28 @@ fn main_loop(mut render_state: RenderState, events: Receiver<Event>) {
                 render_state
                     .surface
                     .resize(new_size, &render_state.wgpu_state.device);
+            }
+            Event::UpdateConfig(config_key) => {
+                redraw = true;
+                match config_key {
+                    ConfigKey::Seed(seed) => {
+                        let _ = attractor_sender.send(AttractorMess::SetSeed(seed));
+                    }
+                    ConfigKey::Multisampling(multisampling) => {
+                        let _ =
+                            attractor_sender.send(AttractorMess::SetMultisampling(multisampling));
+                        render_state.attractor_renderer.recreate_aggregate_buffer(
+                            &render_state.wgpu_state.device,
+                            render_state.attractor_renderer.size,
+                            multisampling,
+                        );
+                    }
+                    ConfigKey::Intensity(intensity) => {
+                        let _ = attractor_sender.send(AttractorMess::SetIntensity(intensity));
+                    }
+                }
+                // wait for the attractor to update to start redrawing
+                recv_bitmap.recv(|_| {});
             }
             Event::Redraw => {
                 log::info!("Rendering Frame");
