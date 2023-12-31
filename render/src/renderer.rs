@@ -26,7 +26,7 @@ impl<W: HasRawWindowHandle + HasRawDisplayHandle> SurfaceState<W> {
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
             width: size.0,
             height: size.1,
-            present_mode: wgpu::PresentMode::AutoNoVsync,
+            present_mode: wgpu::PresentMode::AutoVsync,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
         };
@@ -57,12 +57,15 @@ impl<W: HasRawWindowHandle + HasRawDisplayHandle> SurfaceState<W> {
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
 
+        log::trace!("Surface capabilities: {:?}", surface_caps);
+        log::debug!("Surface format: {:?}", surface_format);
+
         self.config = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
             width: size.0,
             height: size.1,
-            present_mode: wgpu::PresentMode::AutoNoVsync,
+            present_mode: wgpu::PresentMode::AutoVsync,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
         };
@@ -417,7 +420,7 @@ impl AttractorRenderer {
         self.recreate_aggregate_buffer(device, new_size, self.multisampling);
     }
 
-    pub fn load_aggragate_buffer(&mut self, queue: &Queue, buffer: &[i32]) {
+    pub fn load_aggregate_buffer(&mut self, queue: &Queue, buffer: &[i32]) {
         queue.write_buffer(&self.aggregate_buffer, 0, bytemuck::cast_slice(buffer));
     }
 
@@ -727,7 +730,11 @@ fn create_render_pipeline(
     pipeline_layout: &wgpu::PipelineLayout,
     multisampling: u8,
 ) -> Result<RenderPipeline, Box<dyn Error>> {
+    #[cfg(not(target_os = "android"))]
     let mut source = std::fs::read_to_string("render/src/shader.wgsl")?;
+    #[cfg(target_os = "android")]
+    let mut source = include_str!("shader.wgsl").to_string();
+
     source = source.replace("MULTISAMPLING", &format!("{}u", multisampling));
     source = source.replace("LANCZOS_WIDTH", &format!("{}u", multisampling * 2));
 

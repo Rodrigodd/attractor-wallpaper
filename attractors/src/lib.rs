@@ -21,7 +21,8 @@ pub enum Behavior {
     Periodic { lyapunov: f64, to: Point },
 }
 
-#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Attractor {
     pub a: [f64; 6],
     pub b: [f64; 6],
@@ -408,7 +409,8 @@ impl Buffer for &[AtomicI32] {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AntiAliasing {
     #[default]
     None,

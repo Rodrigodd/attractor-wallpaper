@@ -13,7 +13,7 @@ use super::{
 };
 use oklab::{OkHsl, OkHsv, Srgb};
 
-//// Shows a color picker where the user can change the given [`OkHsl`] color.
+/// Shows a color picker where the user can change the given [`OkHsl`] color.
 ///
 /// Returns `true` on change.
 pub fn color_picker_circle(ui: &mut Ui, current_color: &mut Srgb) -> bool {

@@ -11,7 +11,7 @@ use super::{
     color_text_rgb_hex_ui, ToColor32,
 };
 use oklab::{OkHsv, OkLch, Srgb};
-//// Shows a color picker where the user can change the given [`OkHsv`] color.
+/// Shows a color picker where the user can change the given [`OkHsv`] color.
 ///
 /// Returns `true` on change.
 pub fn color_picker_2d(ui: &mut Ui, oklch: &mut OkLch) -> bool {
@@ -34,7 +34,7 @@ pub fn color_picker_2d(ui: &mut Ui, oklch: &mut OkLch) -> bool {
     }
 }
 
-//// Shows a color picker where the user can change the given [`OkHsv`] color.
+/// Shows a color picker where the user can change the given [`OkHsv`] color.
 ///
 /// Returns `true` on change.
 pub fn color_picker_circle(ui: &mut Ui, current_color: &mut Srgb) -> bool {
