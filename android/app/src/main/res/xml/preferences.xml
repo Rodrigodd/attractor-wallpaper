@@ -1,10 +1,6 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <Preference
-        app:title="@string/pref_set_wallpaper"
-        app:key="set_wallpaper_button" />
-
     <PreferenceCategory app:title="@string/prefs_attractor">
         <EditTextPreference
             android:visibility="visible"
@@ -12,10 +8,14 @@
             android:inputType="number"
             app:key="seed"
             app:defaultValue="1000"
+            app:summary="@string/pref_seed_sum"
             app:title="@string/prefs_seed" />
-        <!--            app:summary="@string/pref_update_freq_sum"-->
 
     </PreferenceCategory>
+
+    <Preference
+        app:title="@string/pref_set_wallpaper"
+        app:key="set_wallpaper_button" />
 
     <PreferenceCategory app:title="@string/prefs_quality">
 
@@ -34,7 +34,7 @@
             android:max="4"
             app:key="multisampling"
             app:title="@string/prefs_multisampling"
-            app:showSeekBarValue="false"
+            app:showSeekBarValue="true"
             app:updatesContinuously="true" />
 
     </PreferenceCategory>

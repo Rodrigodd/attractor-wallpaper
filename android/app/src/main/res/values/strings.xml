@@ -9,4 +9,6 @@
     <string name="prefs_multisampling">Multisampling</string>
     <string name="prefs_attractor">Attractor</string>
     <string name="prefs_seed">Seed</string>
+    <string name="pref_seed_sum">%1$s</string>
+    <string name="pref_intensity_sum">%4.2f</string>
 </resources>

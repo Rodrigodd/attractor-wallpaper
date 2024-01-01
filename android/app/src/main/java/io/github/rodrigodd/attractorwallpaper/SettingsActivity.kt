@@ -1,9 +1,11 @@
 package io.github.rodrigodd.attractorwallpaper
 
 import android.os.Bundle
+import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceFragmentCompat
+import androidx.preference.SeekBarPreference
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -20,16 +22,45 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     class SettingsFragment : PreferenceFragmentCompat() {
+        val TAG: String = "SettingsActivity"
+
         override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
             setPreferencesFromResource(R.xml.preferences, rootKey)
 
-            val prefs = preferenceManager.sharedPreferences
-            prefs?.registerOnSharedPreferenceChangeListener { sharedPreferences, key ->
+            val prefs = preferenceManager.sharedPreferences ?: return
+
+            val seedPref = findPreference<EditTextPreference>("seed")
+            val intensityPref = findPreference<SeekBarPreference>("intensity")
+            if (seedPref == null || intensityPref == null) {
+                Log.e(TAG, "no pref found")
+                return
+            }
+
+
+            seedPref.summary =
+                resources.getString(R.string.pref_seed_sum, prefs.getString("seed", "0"))
+            intensityPref.summary =
+                resources.getString(
+                    R.string.pref_intensity_sum,
+                    prefs.getInt("intensity", 100).toFloat() / 100.0
+                )
+
+            prefs.registerOnSharedPreferenceChangeListener { sharedPreferences, key ->
                 when (key) {
                     "seed" -> {
                         val seed = sharedPreferences.getString(key, "0")
-                        val pref = findPreference<EditTextPreference>("seed")
-                        pref?.text = seed
+                        seedPref.text = seed
+                        seedPref.summary =
+                            resources.getString(R.string.pref_seed_sum, seed)
+                    }
+
+                    "intensity" -> {
+                        val intensity = sharedPreferences.getInt(key, 100)
+                        intensityPref.summary =
+                            resources.getString(
+                                R.string.pref_intensity_sum,
+                                intensity.toFloat() / 100.0
+                            )
                     }
                 }
             }
