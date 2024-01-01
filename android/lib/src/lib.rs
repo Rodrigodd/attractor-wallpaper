@@ -66,6 +66,7 @@ enum ConfigKey {
     Seed(u64),
     Multisampling(u8),
     Intensity(f32),
+    MinArea(f32),
 }
 
 enum Event {
@@ -113,6 +114,7 @@ fn on_update_config_int(ctx: &mut Context, key: &str, value: i32) {
         "seed" => ConfigKey::Seed(value as u64),
         "multisampling" => ConfigKey::Multisampling(value as u8),
         "intensity" => ConfigKey::Intensity(value as f32 / 100.0),
+        "min_area" => ConfigKey::MinArea(value as f32 / 100.0),
         _ => {
             log::error!("unknown config key: {}", key);
             return;
@@ -214,6 +216,10 @@ fn main_loop(mut render_state: RenderState, events: Receiver<Event>) {
                     }
                     ConfigKey::Intensity(intensity) => {
                         let _ = attractor_sender.send(AttractorMess::SetIntensity(intensity));
+                    }
+                    ConfigKey::MinArea(min_area) => {
+                        let min_area = (min_area * 4096.0).round() as u16;
+                        let _ = attractor_sender.send(AttractorMess::SetMinArea(min_area));
                     }
                 }
                 // wait for the attractor to update to start redrawing

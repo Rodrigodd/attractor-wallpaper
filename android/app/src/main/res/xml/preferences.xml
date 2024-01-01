@@ -11,6 +11,15 @@
             app:summary="@string/pref_seed_sum"
             app:title="@string/prefs_seed" />
 
+        <SeekBarPreference
+            app:defaultValue="25"
+            app:min="0"
+            android:max="50"
+            app:key="min_area"
+            app:title="@string/pref_min_area"
+            app:showSeekBarValue="false"
+            app:updatesContinuously="true" />
+
     </PreferenceCategory>
 
     <Preference

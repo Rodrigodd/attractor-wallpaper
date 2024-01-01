@@ -11,4 +11,6 @@
     <string name="prefs_seed">Seed</string>
     <string name="pref_seed_sum">%1$s</string>
     <string name="pref_intensity_sum">%4.2f</string>
+    <string name="pref_min_area">Minimun Area</string>
+    <string name="pref_min_area_sum">%d %%</string>
 </resources>

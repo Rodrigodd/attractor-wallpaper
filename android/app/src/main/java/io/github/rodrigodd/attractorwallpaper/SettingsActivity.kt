@@ -31,7 +31,8 @@ class SettingsActivity : AppCompatActivity() {
 
             val seedPref = findPreference<EditTextPreference>("seed")
             val intensityPref = findPreference<SeekBarPreference>("intensity")
-            if (seedPref == null || intensityPref == null) {
+            val minAreaPref = findPreference<SeekBarPreference>("min_area")
+            if (seedPref == null || intensityPref == null || minAreaPref == null) {
                 Log.e(TAG, "no pref found")
                 return
             }
@@ -44,6 +45,11 @@ class SettingsActivity : AppCompatActivity() {
                     R.string.pref_intensity_sum,
                     prefs.getInt("intensity", 100).toFloat() / 100.0
                 )
+            minAreaPref.summary =
+                resources.getString(
+                    R.string.pref_min_area_sum,
+                    prefs.getInt("min_area", 25)
+                )
 
             prefs.registerOnSharedPreferenceChangeListener { sharedPreferences, key ->
                 when (key) {
@@ -55,11 +61,20 @@ class SettingsActivity : AppCompatActivity() {
                     }
 
                     "intensity" -> {
-                        val intensity = sharedPreferences.getInt(key, 100)
+                        val intensity = sharedPreferences.getInt(key, 25)
                         intensityPref.summary =
                             resources.getString(
                                 R.string.pref_intensity_sum,
                                 intensity.toFloat() / 100.0
+                            )
+                    }
+
+                    "min_area" -> {
+                        val min_area = sharedPreferences.getInt(key, 100)
+                        minAreaPref.summary =
+                            resources.getString(
+                                R.string.pref_min_area_sum,
+                                min_area
                             )
                     }
                 }
