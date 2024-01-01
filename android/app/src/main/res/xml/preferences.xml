@@ -1,6 +1,11 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
+    <Preference
+        app:title="@string/pref_set_wallpaper"
+        app:key="set_wallpaper_button"
+        />
+
     <PreferenceCategory app:title="@string/prefs_attractor">
         <EditTextPreference
             android:visibility="visible"
@@ -21,10 +26,6 @@
             app:updatesContinuously="true" />
 
     </PreferenceCategory>
-
-    <Preference
-        app:title="@string/pref_set_wallpaper"
-        app:key="set_wallpaper_button" />
 
     <PreferenceCategory app:title="@string/prefs_quality">
 

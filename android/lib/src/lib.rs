@@ -3,8 +3,8 @@ use oklab::{OkLch, Oklab};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use render::gradient::Gradient;
 use render::{
-    update_render, AttractorConfig, AttractorCtx, AttractorMess, AttractorRenderer, SurfaceState,
-    WgpuState,
+    render_to_bitmap, update_render, AttractorConfig, AttractorCtx, AttractorMess,
+    AttractorRenderer, SurfaceState, WgpuState,
 };
 
 use std::{
@@ -80,20 +80,28 @@ enum Event {
 struct Context {
     thread: std::thread::JoinHandle<()>,
     sender: std::sync::mpsc::Sender<Event>,
+    config: Arc<Mutex<AttractorConfig>>,
 }
 
 fn on_create(window: NativeWindow) -> Result<Box<Context>, Box<dyn Error>> {
     let (sender, receiver) = std::sync::mpsc::channel();
 
-    let render_state = pollster::block_on(build_renderer(window))?;
+    let mut render_state = pollster::block_on(build_renderer(window))?;
 
-    let thread = std::thread::spawn(|| main_loop(render_state, receiver));
+    let (attractor_sender, recv_bitmap, config) = init_attractor(&mut render_state);
+
+    let thread =
+        std::thread::spawn(|| main_loop(render_state, receiver, attractor_sender, recv_bitmap));
 
     sender.send(Event::Created).expect("event channel");
-    Ok(Box::new(Context { thread, sender }))
+    Ok(Box::new(Context {
+        thread,
+        sender,
+        config,
+    }))
 }
 
-fn on_resize(ctx: &mut Context, width: i32, height: i32) {
+fn on_resize(ctx: &Context, width: i32, height: i32) {
     ctx.sender
         .send(Event::Resized((width as u32, height as u32)))
         .expect("event channel");
@@ -105,11 +113,11 @@ fn on_destroy(ctx: Box<Context>) {
     ctx.thread.join().expect("event channel");
 }
 
-fn on_redraw(ctx: &mut Context) {
+fn on_redraw(ctx: &Context) {
     ctx.sender.send(Event::Redraw).expect("event channel");
 }
 
-fn on_update_config_int(ctx: &mut Context, key: &str, value: i32) {
+fn on_update_config_int(ctx: &Context, key: &str, value: i32) {
     let config_key = match key {
         "seed" => ConfigKey::Seed(value as u64),
         "multisampling" => ConfigKey::Multisampling(value as u8),
@@ -125,7 +133,21 @@ fn on_update_config_int(ctx: &mut Context, key: &str, value: i32) {
         .expect("event channel");
 }
 
-fn main_loop(mut render_state: RenderState, events: Receiver<Event>) {
+fn on_get_wallpaper(ctx: &Context, width: u32, height: u32, bitmap: &mut [u8]) {
+    let mut config = ctx.config.lock().clone();
+    config.resize((width, height), config.multisampling);
+    config.samples_per_iteration = 20_000_000;
+    let result = render_wallpaper(config);
+    bitmap.clone_from_slice(&result);
+}
+
+fn init_attractor(
+    render_state: &mut RenderState,
+) -> (
+    std::sync::mpsc::Sender<AttractorMess>,
+    render::channel::Receiver<AttractorCtx>,
+    Arc<Mutex<AttractorConfig>>,
+) {
     let mut attractor_config = AttractorConfig {
         size: (1, 1),
         transform: ([1.0, 0.0, 0.0, 1.0], [0.0, 0.0]),
@@ -161,11 +183,19 @@ fn main_loop(mut render_state: RenderState, events: Receiver<Event>) {
     let attractor_config = Arc::new(Mutex::new(attractor_config));
 
     let (attractor_sender, recv_conf) = std::sync::mpsc::channel::<AttractorMess>();
-    let (sender_bitmap, mut recv_bitmap) = render::channel::channel::<AttractorCtx>();
+    let (sender_bitmap, recv_bitmap) = render::channel::channel::<AttractorCtx>();
     let attractor = AttractorCtx::new(attractor_config.clone());
 
     std::thread::spawn(move || render::attractor_thread(recv_conf, attractor, sender_bitmap));
+    (attractor_sender, recv_bitmap, attractor_config)
+}
 
+fn main_loop(
+    mut render_state: RenderState,
+    events: Receiver<Event>,
+    attractor_sender: std::sync::mpsc::Sender<AttractorMess>,
+    mut recv_bitmap: render::channel::Receiver<AttractorCtx>,
+) {
     let mut redraw = false;
 
     loop {
@@ -369,4 +399,55 @@ fn render_frame(render_state: &mut RenderState) {
     drop(render_pass);
     queue.submit(std::iter::once(encoder.finish()));
     texture.present();
+}
+
+fn render_wallpaper(config: AttractorConfig) -> Vec<u8> {
+    let multithreaded = config.multithreading;
+    let multisampling = config.multisampling;
+    let size = config.size;
+
+    let mut attractor = AttractorCtx::new(Arc::new(Mutex::new(config)));
+
+    attractor.resize((size.0, size.1), multisampling);
+
+    render::aggregate_buffer(multithreaded, &mut attractor);
+
+    let AttractorCtx {
+        bitmap,
+        total_samples,
+        config,
+        ..
+    } = attractor;
+
+    let config = Arc::try_unwrap(config).unwrap().into_inner();
+
+    let AttractorConfig {
+        size,
+        base_intensity,
+        multisampling,
+        anti_aliasing,
+        gradient,
+        background_color_1,
+        background_color_2,
+        transform: (mat, _),
+        ..
+    } = config;
+
+    pollster::block_on(async move {
+        let bitmap = render_to_bitmap(
+            size,
+            multisampling,
+            bitmap,
+            base_intensity,
+            mat,
+            total_samples,
+            anti_aliasing,
+            gradient,
+            background_color_1,
+            background_color_2,
+        )
+        .await;
+
+        bitmap
+    })
 }

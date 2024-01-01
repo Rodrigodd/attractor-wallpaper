@@ -20,9 +20,9 @@ use parking_lot::Mutex;
 use rand::prelude::*;
 
 use render::{
-    aggregate_buffer, attractor_thread, gradient::Gradient, update_render, AttractorConfig,
-    AttractorCtx, AttractorMess, AttractorRenderer, Multithreading, SavedThemes, SurfaceState,
-    Theme, WgpuState,
+    aggregate_buffer, attractor_thread, gradient::Gradient, render_to_bitmap, update_render,
+    AttractorConfig, AttractorCtx, AttractorMess, AttractorRenderer, Multithreading, SavedThemes,
+    SurfaceState, Theme, WgpuState,
 };
 use winit::event::{KeyboardInput, ModifiersState, VirtualKeyCode};
 use winit_executor::{TaskId, WinitExecutor};
@@ -1150,47 +1150,6 @@ fn build_ui(
             }
         });
     })
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn render_to_bitmap(
-    size: (u32, u32),
-    multisampling: u8,
-    mut bitmap: Vec<i32>,
-    base_intensity: i16,
-    mat: [f64; 4],
-    total_samples: u64,
-    anti_aliasing: AntiAliasing,
-    gradient: Gradient<Oklab>,
-    background_color_1: OkLch,
-    background_color_2: OkLch,
-) -> Vec<u8> {
-    let wgpu_state = WgpuState::new_headless().await.unwrap();
-    let mut attractor_renderer = AttractorRenderer::new(
-        &wgpu_state.device,
-        size,
-        wgpu::TextureFormat::Rgba8UnormSrgb,
-        multisampling,
-    )
-    .unwrap();
-
-    bitmap[0] = render::get_intensity(base_intensity as f32, mat, total_samples, anti_aliasing);
-    attractor_renderer.load_aggregate_buffer(&wgpu_state.queue, &bitmap);
-
-    update_render(
-        &mut attractor_renderer,
-        &wgpu_state,
-        &gradient,
-        multisampling,
-        background_color_1,
-        background_color_2,
-    );
-
-    let texture = wgpu_state.new_target_texture(size);
-    let view = texture.create_view(&Default::default());
-    attractor_renderer.render(&wgpu_state.device, &wgpu_state.queue, &view);
-
-    wgpu_state.copy_texture_content(texture)
 }
 
 fn update_gui_state_from_config(gui_state: &mut GuiState, config: &AttractorConfig) {

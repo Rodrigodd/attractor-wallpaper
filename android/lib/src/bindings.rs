@@ -1,4 +1,5 @@
 //! JNI bindings to native methods of io.github.rodrigodd.attractorwallpaper.AttractorSurfaceView
+#![allow(non_snake_case)]
 
 use jni::{
     objects::{JClass, JObject, JString},
@@ -62,7 +63,7 @@ pub extern "system" fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurf
         height
     );
     unsafe {
-        super::on_resize(&mut *ctx, width, height);
+        super::on_resize(&*ctx, width, height);
     }
 }
 
@@ -92,11 +93,11 @@ pub extern "system" fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurf
     let ctx = ctx as *mut super::Context;
     log::debug!("nativeSurfaceRedrawNeeded: {:p} {:?}", ctx, surface,);
     unsafe {
-        super::on_redraw(&mut *ctx);
+        super::on_redraw(&*ctx);
     }
 }
 
-/// #fun nativeUpdateConfigInt(ctx: Long, key: String, value: Int)
+/// #nativeUpdateConfigInt(ctx: Long, key: String, value: Int)
 #[no_mangle]
 pub extern "system" fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurfaceView_nativeUpdateConfigInt(
     _env: JNIEnv,
@@ -119,6 +120,49 @@ pub extern "system" fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurf
     };
     log::debug!("nativeUpdateConfigInt: {:p} {} {}", ctx, key, value);
     unsafe {
-        super::on_update_config_int(&mut *ctx, key, value);
+        super::on_update_config_int(&*ctx, key, value);
     }
+}
+
+/// #nativeGetWallpaper(ctx: Long, bitmap: Bitmap): Bitmap?
+#[no_mangle]
+fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurfaceView_nativeGetWallpaper<'a>(
+    env: JNIEnv,
+    _: JClass,
+    ctx: jlong,
+    bitmap_obj: JObject<'a>,
+) -> JObject<'a> {
+    let ctx = ctx as *mut super::Context;
+    log::debug!("nativeGetWallpaper: {:p} {:?}", ctx, bitmap_obj);
+
+    let bitmap =
+        unsafe { ndk::bitmap::Bitmap::from_jni(env.get_native_interface(), bitmap_obj.as_raw()) };
+
+    let Ok(info) = bitmap.info() else {
+        log::error!("Failed to get bitmap info");
+        return JObject::null();
+    };
+    let width = info.width();
+    let height = info.height();
+
+    if info.format() != ndk::bitmap::BitmapFormat::RGBA_8888 {
+        log::error!("Bitmap format is not RGBA_8888");
+        return JObject::null();
+    }
+
+    let Ok(pixels) = bitmap.lock_pixels() else {
+        log::error!("Failed to lock bitmap pixels");
+        return JObject::null();
+    };
+
+    let pixels =
+        unsafe { std::slice::from_raw_parts_mut(pixels as *mut u8, (width * height * 4) as usize) };
+
+    unsafe {
+        super::on_get_wallpaper(&*ctx, width, height, pixels);
+    }
+
+    let _ = bitmap.unlock_pixels();
+
+    bitmap_obj
 }

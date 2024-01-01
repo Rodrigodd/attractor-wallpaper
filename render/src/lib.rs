@@ -579,3 +579,45 @@ pub fn merge_par_aggregate_attractor(attractor: &mut AttractorCtx) {
     }
     attractor.bitmap.truncate(len);
 }
+
+/// Returns a RGBA8 bitmap of the rendered attractor.
+#[allow(clippy::too_many_arguments)]
+pub async fn render_to_bitmap(
+    size: (u32, u32),
+    multisampling: u8,
+    mut bitmap: Vec<i32>,
+    base_intensity: i16,
+    mat: [f64; 4],
+    total_samples: u64,
+    anti_aliasing: AntiAliasing,
+    gradient: Gradient<Oklab>,
+    background_color_1: OkLch,
+    background_color_2: OkLch,
+) -> Vec<u8> {
+    let wgpu_state = WgpuState::new_headless().await.unwrap();
+    let mut attractor_renderer = AttractorRenderer::new(
+        &wgpu_state.device,
+        size,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        multisampling,
+    )
+    .unwrap();
+
+    bitmap[0] = get_intensity(base_intensity as f32, mat, total_samples, anti_aliasing);
+    attractor_renderer.load_aggregate_buffer(&wgpu_state.queue, &bitmap);
+
+    update_render(
+        &mut attractor_renderer,
+        &wgpu_state,
+        &gradient,
+        multisampling,
+        background_color_1,
+        background_color_2,
+    );
+
+    let texture = wgpu_state.new_target_texture(size);
+    let view = texture.create_view(&Default::default());
+    attractor_renderer.render(&wgpu_state.device, &wgpu_state.queue, &view);
+
+    wgpu_state.copy_texture_content(texture)
+}

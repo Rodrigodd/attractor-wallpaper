@@ -1,6 +1,7 @@
 package io.github.rodrigodd.attractorwallpaper
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
@@ -46,6 +47,14 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
     private external fun nativeSurfaceRedrawNeeded(ctx: Long, surface: Surface);
 
     private external fun nativeUpdateConfigInt(ctx: Long, key: String, value: Int);
+
+    private external fun nativeGetWallpaper(ctx: Long, bitmap: Bitmap): Bitmap?;
+
+    fun getWallpaper(width: Int, height: Int): Bitmap? {
+        if (nativeCtx == 0L) return null
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        return nativeGetWallpaper(nativeCtx, bitmap)
+    }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         Log.i("AttractorSurfaceView", "surfaceCreated")
