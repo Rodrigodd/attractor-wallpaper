@@ -1,6 +1,8 @@
 package io.github.rodrigodd.attractorwallpaper
 
 import android.content.Context
+import android.content.SharedPreferences
+import android.content.SharedPreferences.OnSharedPreferenceChangeListener
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Paint
@@ -12,7 +14,8 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.preference.PreferenceManager
 
-class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
+class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2,
+    OnSharedPreferenceChangeListener {
     init {
         holder.addCallback(this)
     }
@@ -28,7 +31,6 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
             }
         }
     }
-
 
     private var nativeCtx: Long = 0
 
@@ -79,6 +81,14 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
                 textSize = 100f
             })
             surface.unlockCanvasAndPost(canvas)
+            return
+        }
+
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        prefs.registerOnSharedPreferenceChangeListener(this)
+
+        for (key in prefs.all.keys) {
+            onSharedPreferenceChanged(prefs, key)
         }
     }
 
@@ -95,6 +105,9 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
         Log.i(TAG, "surfaceDestroy")
         if (nativeCtx == 0L) return
         nativeSurfaceDestroyed(nativeCtx, holder.surface)
+
+        val pref = PreferenceManager.getDefaultSharedPreferences(context)
+        pref.unregisterOnSharedPreferenceChangeListener(this)
     }
 
     override fun surfaceRedrawNeeded(holder: SurfaceHolder) {
@@ -103,7 +116,34 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
         nativeSurfaceRedrawNeeded(nativeCtx, holder.surface)
     }
 
-    var downTouch = false
+    override fun onSharedPreferenceChanged(pref: SharedPreferences, key: String) {
+        Log.d(TAG, "onSharedPreferenceChanged: $key")
+        if (nativeCtx == 0L) return
+
+        when (key) {
+            "multisampling" -> {
+                val value = pref.getInt(key, 1)
+                nativeUpdateConfigInt(nativeCtx, key, value)
+            }
+
+            "seed" -> {
+                val value = pref.getString("seed", "0")?.toLong() ?: 0
+                nativeUpdateConfigInt(nativeCtx, key, value.toInt())
+            }
+
+            "intensity" -> {
+                val value = pref.getInt(key, 100)
+                nativeUpdateConfigInt(nativeCtx, key, value)
+            }
+
+            "min_area" -> {
+                val value = pref.getInt(key, 25)
+                nativeUpdateConfigInt(nativeCtx, key, value)
+            }
+        }
+    }
+
+    private var downTouch = false
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         super.onTouchEvent(event)
@@ -144,38 +184,9 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
         }
     }
 
-
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
-
-        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-
-        prefs.registerOnSharedPreferenceChangeListener { pref, key ->
-            Log.d(TAG, "onSharedPreferenceChanged: $key")
-            if (nativeCtx == 0L) return@registerOnSharedPreferenceChangeListener
-
-            when (key) {
-                "multisampling" -> {
-                    val value = pref.getInt(key, 1)
-                    nativeUpdateConfigInt(nativeCtx, key, value)
-                }
-
-                "seed" -> {
-                    val value = pref.getString("seed", "0")?.toLong() ?: 0
-                    nativeUpdateConfigInt(nativeCtx, key, value.toInt())
-                }
-
-                "intensity" -> {
-                    val value = pref.getInt(key, 100)
-                    nativeUpdateConfigInt(nativeCtx, key, value)
-                }
-
-                "min_area" -> {
-                    val value = pref.getInt(key, 25)
-                    nativeUpdateConfigInt(nativeCtx, key, value)
-                }
-            }
-        }
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
     }
 
     constructor(context: Context?) : super(context)
@@ -185,6 +196,4 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
         attrs,
         defStyleAttr
     )
-
-
 }

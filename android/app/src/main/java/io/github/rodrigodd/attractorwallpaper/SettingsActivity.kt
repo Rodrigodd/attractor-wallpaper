@@ -1,10 +1,10 @@
 package io.github.rodrigodd.attractorwallpaper
 
 import android.app.WallpaperManager
+import android.content.SharedPreferences
+import android.content.SharedPreferences.OnSharedPreferenceChangeListener
 import android.os.Bundle
 import android.util.Log
-import android.view.WindowManager
-import android.view.WindowMetrics
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.preference.EditTextPreference
@@ -30,70 +30,50 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     class SettingsFragment(
-        val surfaceView: AttractorSurfaceView,
-        val settingsActivity: SettingsActivity
-    ) : PreferenceFragmentCompat() {
-        val TAG: String = "SettingsActivity"
+        private val surfaceView: AttractorSurfaceView,
+        private val settingsActivity: SettingsActivity
+    ) : PreferenceFragmentCompat(), OnSharedPreferenceChangeListener {
+        companion object {
+            private const val TAG = "SettingsActivity"
+        }
+
+        private var seedPref: EditTextPreference? = null
+        private var intensityPref: SeekBarPreference? = null
+        private var minAreaPref: SeekBarPreference? = null
+        private var setWallpaperPref: Preference? = null
 
         override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
             setPreferencesFromResource(R.xml.preferences, rootKey)
 
+            seedPref = findPreference("seed")!!
+            intensityPref = findPreference("intensity")!!
+            minAreaPref = findPreference("min_area")!!
+            setWallpaperPref = findPreference("set_wallpaper_button")!!
+        }
+
+        override fun onPause() {
+            super.onPause()
+            preferenceManager
+                .sharedPreferences?.unregisterOnSharedPreferenceChangeListener(this)
+        }
+
+        override fun onResume() {
+            super.onResume()
             val prefs = preferenceManager.sharedPreferences ?: return
 
-            val seedPref = findPreference<EditTextPreference>("seed")!!
-            val intensityPref = findPreference<SeekBarPreference>("intensity")!!
-            val minAreaPref = findPreference<SeekBarPreference>("min_area")!!
-            val setWallpaperPref = findPreference<Preference>("set_wallpaper_button")!!
-
-            seedPref.summary =
-                resources.getString(R.string.pref_seed_sum, prefs.getString("seed", "0"))
-            intensityPref.summary =
-                resources.getString(
-                    R.string.pref_intensity_sum,
-                    prefs.getInt("intensity", 100).toFloat() / 100.0
-                )
-            minAreaPref.summary =
-                resources.getString(
-                    R.string.pref_min_area_sum,
-                    prefs.getInt("min_area", 25)
-                )
-
-            prefs.registerOnSharedPreferenceChangeListener { sharedPreferences, key ->
-                when (key) {
-                    "seed" -> {
-                        val seed = sharedPreferences.getString(key, "0")
-                        seedPref.text = seed
-                        seedPref.summary =
-                            resources.getString(R.string.pref_seed_sum, seed)
-                    }
-
-                    "intensity" -> {
-                        val intensity = sharedPreferences.getInt(key, 25)
-                        intensityPref.summary =
-                            resources.getString(
-                                R.string.pref_intensity_sum,
-                                intensity.toFloat() / 100.0
-                            )
-                    }
-
-                    "min_area" -> {
-                        val min_area = sharedPreferences.getInt(key, 100)
-                        minAreaPref.summary =
-                            resources.getString(
-                                R.string.pref_min_area_sum,
-                                min_area
-                            )
-                    }
-                }
+            for (key in prefs.all.keys) {
+                onSharedPreferenceChanged(prefs, key)
             }
 
-            setWallpaperPref.setOnPreferenceClickListener {
+            prefs.registerOnSharedPreferenceChangeListener(this)
+
+            setWallpaperPref?.setOnPreferenceClickListener {
                 val icon =
                     AppCompatResources.getDrawable(
                         requireContext(),
                         R.drawable.ic_launcher_foreground
                     )
-                if (icon != null) setWallpaperPref.icon = icon
+                if (icon != null) setWallpaperPref?.icon = icon
 
                 Thread {
                     val wallpaperManager = WallpaperManager.getInstance(requireContext())
@@ -121,11 +101,43 @@ class SettingsActivity : AppCompatActivity() {
                     if (bitmap != null) wallpaperManager.setBitmap(bitmap)
 
                     settingsActivity.runOnUiThread {
-                        setWallpaperPref.icon = null
+                        setWallpaperPref?.icon = null
                     }
                 }.start()
 
                 return@setOnPreferenceClickListener true
+            }
+        }
+
+        override fun onSharedPreferenceChanged(
+            sharedPreferences: SharedPreferences,
+            key: String
+        ) {
+            when (key) {
+                "seed" -> {
+                    val seed = sharedPreferences.getString(key, "0")
+                    seedPref?.text = seed
+                    seedPref?.summary =
+                        resources.getString(R.string.pref_seed_sum, seed)
+                }
+
+                "intensity" -> {
+                    val intensity = sharedPreferences.getInt(key, 25)
+                    intensityPref?.summary =
+                        resources.getString(
+                            R.string.pref_intensity_sum,
+                            intensity.toFloat() / 100.0
+                        )
+                }
+
+                "min_area" -> {
+                    val minArea = sharedPreferences.getInt(key, 100)
+                    minAreaPref?.summary =
+                        resources.getString(
+                            R.string.pref_min_area_sum,
+                            minArea
+                        )
+                }
             }
         }
     }
