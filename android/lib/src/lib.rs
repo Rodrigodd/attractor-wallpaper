@@ -35,7 +35,7 @@ fn init_logger() {
             .with_max_level(log::LevelFilter::Trace)
             .with_filter(
                 FilterBuilder::new()
-                    .parse("info,attractor_android=trace,attractor=trace")
+                    .parse("info,attractor_android=trace,attractor=trace,render=trace")
                     .build(),
             )
             .with_tag("attractor-rust"),
@@ -133,11 +133,40 @@ fn on_update_config_int(ctx: &Context, key: &str, value: i32) {
         .expect("event channel");
 }
 
-fn on_get_wallpaper(ctx: &Context, width: u32, height: u32, bitmap: &mut [u8]) {
+fn on_get_wallpaper(
+    ctx: &Context,
+    width: u32,
+    height: u32,
+    view_width: u32,
+    view_height: u32,
+    bitmap: &mut [u8],
+) {
     let mut config = ctx.config.lock().clone();
+    log::debug!(
+        "resizing from {}x{} to {}x{}",
+        config.size.0,
+        config.size.1,
+        width,
+        height
+    );
+
     config.resize((width, height), config.multisampling);
+
+    // the wallpaper image is much wider than the display size, so decrease the size of the
+    // attractor to fit the display.
+    // this scales the view, so the division is reversed.
+    let scale = width as f64 / view_width as f64;
+    config.transform.0[0] *= scale;
+    config.transform.0[1] *= scale;
+    config.transform.0[2] *= scale;
+    config.transform.0[3] *= scale;
+    config.transform.1[0] *= scale;
+    config.transform.1[1] *= scale;
+
     config.samples_per_iteration = 20_000_000;
+
     let result = render_wallpaper(config);
+
     bitmap.clone_from_slice(&result);
 }
 
@@ -402,6 +431,7 @@ fn render_frame(render_state: &mut RenderState) {
 }
 
 fn render_wallpaper(config: AttractorConfig) -> Vec<u8> {
+    log::info!("rendering wallpaper");
     let multithreaded = config.multithreading;
     let multisampling = config.multisampling;
     let size = config.size;

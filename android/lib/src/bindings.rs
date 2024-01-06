@@ -124,13 +124,15 @@ pub extern "system" fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurf
     }
 }
 
-/// #nativeGetWallpaper(ctx: Long, bitmap: Bitmap): Bitmap?
+/// #nativeGetWallpaper(ctx: Long, bitmap: Bitmap, viewWidth: Int, viewHeight: Int): Bitmap?
 #[no_mangle]
 fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurfaceView_nativeGetWallpaper<'a>(
     env: JNIEnv,
     _: JClass,
     ctx: jlong,
     bitmap_obj: JObject<'a>,
+    view_width: u32,
+    view_height: u32,
 ) -> JObject<'a> {
     let ctx = ctx as *mut super::Context;
     log::debug!("nativeGetWallpaper: {:p} {:?}", ctx, bitmap_obj);
@@ -159,7 +161,7 @@ fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurfaceView_nativeGetWal
         unsafe { std::slice::from_raw_parts_mut(pixels as *mut u8, (width * height * 4) as usize) };
 
     unsafe {
-        super::on_get_wallpaper(&*ctx, width, height, pixels);
+        super::on_get_wallpaper(&*ctx, width, height, view_width, view_height, pixels);
     }
 
     let _ = bitmap.unlock_pixels();

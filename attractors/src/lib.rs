@@ -7,7 +7,9 @@ mod sympy;
 type Point = [f64; 2];
 /// (min_x, max_x, min_y, max_y)
 type Bounds = [f64; 4];
-/// Matrix and translation vector
+
+/// Matrix and translation vector. The transformation formula is `A*x + t`, where `A` is the 2x2
+/// matrix and `t` is the translation vector.
 pub type Affine = ([f64; 4], [f64; 2]);
 
 const THUMB_WIDTH: usize = 64;

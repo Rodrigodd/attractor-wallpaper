@@ -2,6 +2,9 @@ package io.github.rodrigodd.attractorwallpaper
 
 import android.app.WallpaperManager
 import android.os.Bundle
+import android.util.Log
+import android.view.WindowManager
+import android.view.WindowMetrics
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.preference.EditTextPreference
@@ -94,9 +97,27 @@ class SettingsActivity : AppCompatActivity() {
 
                 Thread {
                     val wallpaperManager = WallpaperManager.getInstance(requireContext())
-                    val height = wallpaperManager.desiredMinimumHeight
-                    val width = wallpaperManager.desiredMinimumWidth
-                    val bitmap = surfaceView.getWallpaper(height, width)
+                    var width = wallpaperManager.desiredMinimumWidth
+                    var height = wallpaperManager.desiredMinimumHeight
+
+                    val display = resources.displayMetrics
+                    val displayWidth = display.widthPixels
+                    val displayHeight = display.heightPixels
+
+                    if (width <= 0 || height <= 0) {
+                        Log.i(
+                            TAG,
+                            "desiredMinimumWidth or desiredMinimumHeight <= 0, fallback to display size"
+                        )
+                        // fallback to size of the default display
+                        width = displayWidth
+                        height = displayHeight
+                    }
+
+                    Log.i(TAG, "Getting wallpaper $width x $height")
+
+                    val bitmap =
+                        surfaceView.getWallpaper(height, width, displayWidth, displayHeight)
                     if (bitmap != null) wallpaperManager.setBitmap(bitmap)
 
                     settingsActivity.runOnUiThread {

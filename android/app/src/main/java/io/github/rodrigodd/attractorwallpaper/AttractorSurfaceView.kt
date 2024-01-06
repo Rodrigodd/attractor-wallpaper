@@ -48,12 +48,17 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
 
     private external fun nativeUpdateConfigInt(ctx: Long, key: String, value: Int);
 
-    private external fun nativeGetWallpaper(ctx: Long, bitmap: Bitmap): Bitmap?;
+    private external fun nativeGetWallpaper(
+        ctx: Long,
+        bitmap: Bitmap,
+        viewWidth: Int,
+        viewHeight: Int
+    ): Bitmap?;
 
-    fun getWallpaper(width: Int, height: Int): Bitmap? {
+    fun getWallpaper(width: Int, height: Int, viewWidth: Int, viewHeight: Int): Bitmap? {
         if (nativeCtx == 0L) return null
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        return nativeGetWallpaper(nativeCtx, bitmap)
+        return nativeGetWallpaper(nativeCtx, bitmap, viewWidth, viewHeight)
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
