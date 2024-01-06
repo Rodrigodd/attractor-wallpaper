@@ -30,30 +30,30 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2 {
     }
 
 
-    private var nativeCtx: Long = 0;
+    private var nativeCtx: Long = 0
 
     // Returns a pointer to the native context
-    private external fun nativeSurfaceCreated(surface: Surface): Long;
+    private external fun nativeSurfaceCreated(surface: Surface): Long
     private external fun nativeSurfaceChanged(
         ctx: Long,
         surface: Surface,
         format: Int,
         width: Int,
         height: Int
-    );
+    )
 
-    private external fun nativeSurfaceDestroyed(ctx: Long, surface: Surface);
+    private external fun nativeSurfaceDestroyed(ctx: Long, surface: Surface)
 
-    private external fun nativeSurfaceRedrawNeeded(ctx: Long, surface: Surface);
+    private external fun nativeSurfaceRedrawNeeded(ctx: Long, surface: Surface)
 
-    private external fun nativeUpdateConfigInt(ctx: Long, key: String, value: Int);
+    private external fun nativeUpdateConfigInt(ctx: Long, key: String, value: Int)
 
     private external fun nativeGetWallpaper(
         ctx: Long,
         bitmap: Bitmap,
         viewWidth: Int,
         viewHeight: Int
-    ): Bitmap?;
+    ): Bitmap?
 
     fun getWallpaper(width: Int, height: Int, viewWidth: Int, viewHeight: Int): Bitmap? {
         if (nativeCtx == 0L) return null
