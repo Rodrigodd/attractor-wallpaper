@@ -3,6 +3,7 @@ package io.github.rodrigodd.attractorwallpaper
 import android.app.WallpaperManager
 import android.content.SharedPreferences
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener
+import android.graphics.drawable.Animatable
 import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
@@ -71,9 +72,13 @@ class SettingsActivity : AppCompatActivity() {
                 val icon =
                     AppCompatResources.getDrawable(
                         requireContext(),
-                        R.drawable.ic_launcher_foreground
+                        R.drawable.loading_icon_anim
                     )
-                if (icon != null) setWallpaperPref?.icon = icon
+
+                if (icon != null && icon is Animatable) {
+                    icon.start()
+                    setWallpaperPref?.icon = icon
+                }
 
                 Thread {
                     val wallpaperManager = WallpaperManager.getInstance(requireContext())
