@@ -13,4 +13,7 @@
     <string name="pref_intensity_sum">%4.2f</string>
     <string name="pref_min_area">Minimun Area</string>
     <string name="pref_min_area_sum">%d %%</string>
+    <string name="prefs_theme">Theme</string>
+    <string name="prefs_background_color1">Background Color 1</string>
+    <string name="prefs_background_color2">Background Color 2</string>
 </resources>

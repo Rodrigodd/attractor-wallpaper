@@ -3,8 +3,7 @@
 
     <Preference
         app:title="@string/pref_set_wallpaper"
-        app:key="set_wallpaper_button"
-        />
+        app:key="set_wallpaper_button" />
 
     <PreferenceCategory app:title="@string/prefs_attractor">
         <EditTextPreference
@@ -46,6 +45,22 @@
             app:title="@string/prefs_multisampling"
             app:showSeekBarValue="true"
             app:updatesContinuously="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/prefs_theme">
+
+        <com.rarepebble.colorpicker.ColorPreference
+            android:key="background_color1"
+            android:title="@string/prefs_background_color1"
+            android:defaultValue="#f00"
+            app:colorpicker_showAlpha="false"/>
+
+        <com.rarepebble.colorpicker.ColorPreference
+            android:key="background_color2"
+            android:title="@string/prefs_background_color2"
+            android:defaultValue="#f00"
+            app:colorpicker_showAlpha="false"/>
 
     </PreferenceCategory>
 

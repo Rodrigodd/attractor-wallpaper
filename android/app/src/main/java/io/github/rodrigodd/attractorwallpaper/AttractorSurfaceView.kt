@@ -140,6 +140,17 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2,
                 val value = pref.getInt(key, 25)
                 nativeUpdateConfigInt(nativeCtx, key, value)
             }
+
+            "background_color1" -> {
+                val value = pref.getInt(key, Color.BLACK)
+                nativeUpdateConfigInt(nativeCtx, key, value)
+                Log.i(TAG, "background_color1: $value")
+            }
+
+            "background_color2" -> {
+                val value = pref.getInt(key, Color.BLACK)
+                nativeUpdateConfigInt(nativeCtx, key, value)
+            }
         }
     }
 

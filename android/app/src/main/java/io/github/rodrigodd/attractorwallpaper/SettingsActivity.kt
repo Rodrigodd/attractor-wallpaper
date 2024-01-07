@@ -12,6 +12,8 @@ import androidx.preference.EditTextPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SeekBarPreference
+import com.rarepebble.colorpicker.ColorPreference
+
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -143,6 +145,14 @@ class SettingsActivity : AppCompatActivity() {
                             minArea
                         )
                 }
+            }
+        }
+
+        override fun onDisplayPreferenceDialog(preference: Preference) {
+            if (preference is ColorPreference) {
+                preference.showDialog(this, 0)
+            } else {
+                super.onDisplayPreferenceDialog(preference)
             }
         }
     }

@@ -179,6 +179,25 @@ pub struct Srgb8 {
     /// Blue component, with gamut in the range [0, 255]
     pub b: u8,
 }
+impl Srgb8 {
+    /// Convert to equivalent `Srgb` color.
+    pub fn to_f32(self) -> Srgb {
+        Srgb::new(
+            self.r as f32 / 255.0,
+            self.g as f32 / 255.0,
+            self.b as f32 / 255.0,
+        )
+    }
+}
+impl From<[u8; 3]> for Srgb8 {
+    fn from(rgb: [u8; 3]) -> Self {
+        Srgb8 {
+            r: rgb[0],
+            g: rgb[1],
+            b: rgb[2],
+        }
+    }
+}
 impl From<Srgb> for Srgb8 {
     fn from(srgb: Srgb) -> Self {
         let srgb = srgb.clip();

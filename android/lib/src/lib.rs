@@ -67,6 +67,8 @@ enum ConfigKey {
     Multisampling(u8),
     Intensity(f32),
     MinArea(f32),
+    BackgroundColor1(u32),
+    BackgroundColor2(u32),
 }
 
 enum Event {
@@ -90,8 +92,16 @@ fn on_create(window: NativeWindow) -> Result<Box<Context>, Box<dyn Error>> {
 
     let (attractor_sender, recv_bitmap, config) = init_attractor(&mut render_state);
 
-    let thread =
-        std::thread::spawn(|| main_loop(render_state, receiver, attractor_sender, recv_bitmap));
+    let config_clone = config.clone();
+    let thread = std::thread::spawn(|| {
+        main_loop(
+            render_state,
+            receiver,
+            config_clone,
+            attractor_sender,
+            recv_bitmap,
+        )
+    });
 
     sender.send(Event::Created).expect("event channel");
     Ok(Box::new(Context {
@@ -118,11 +128,14 @@ fn on_redraw(ctx: &Context) {
 }
 
 fn on_update_config_int(ctx: &Context, key: &str, value: i32) {
+    log::debug!("update config: {} = {}", key, value);
     let config_key = match key {
         "seed" => ConfigKey::Seed(value as u64),
         "multisampling" => ConfigKey::Multisampling(value as u8),
         "intensity" => ConfigKey::Intensity(value as f32 / 100.0),
         "min_area" => ConfigKey::MinArea(value as f32 / 100.0),
+        "background_color1" => ConfigKey::BackgroundColor1(value as u32),
+        "background_color2" => ConfigKey::BackgroundColor2(value as u32),
         _ => {
             log::error!("unknown config key: {}", key);
             return;
@@ -138,7 +151,7 @@ fn on_get_wallpaper(
     width: u32,
     height: u32,
     view_width: u32,
-    view_height: u32,
+    _view_height: u32,
     bitmap: &mut [u8],
 ) {
     let mut config = ctx.config.lock().clone();
@@ -222,6 +235,7 @@ fn init_attractor(
 fn main_loop(
     mut render_state: RenderState,
     events: Receiver<Event>,
+    config: Arc<Mutex<AttractorConfig>>,
     attractor_sender: std::sync::mpsc::Sender<AttractorMess>,
     mut recv_bitmap: render::channel::Receiver<AttractorCtx>,
 ) {
@@ -279,6 +293,36 @@ fn main_loop(
                     ConfigKey::MinArea(min_area) => {
                         let min_area = (min_area * 4096.0).round() as u16;
                         let _ = attractor_sender.send(AttractorMess::SetMinArea(min_area));
+                    }
+                    ConfigKey::BackgroundColor1(color) => {
+                        let color = color.to_be_bytes();
+                        let color = [color[1], color[2], color[3]];
+                        let color = oklab::Srgb8::from(color);
+                        let mut config = config.lock();
+                        config.background_color_1 = color.to_f32().into();
+                        update_render(
+                            &mut render_state.attractor_renderer,
+                            &render_state.wgpu_state,
+                            &config.gradient,
+                            config.multisampling,
+                            config.background_color_1,
+                            config.background_color_2,
+                        );
+                    }
+                    ConfigKey::BackgroundColor2(color) => {
+                        let color = color.to_be_bytes();
+                        let color = [color[1], color[2], color[3]];
+                        let color = oklab::Srgb8::from(color);
+                        let mut config = config.lock();
+                        config.background_color_2 = color.to_f32().into();
+                        update_render(
+                            &mut render_state.attractor_renderer,
+                            &render_state.wgpu_state,
+                            &config.gradient,
+                            config.multisampling,
+                            config.background_color_1,
+                            config.background_color_2,
+                        );
                     }
                 }
                 // wait for the attractor to update to start redrawing
