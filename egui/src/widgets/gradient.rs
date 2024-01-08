@@ -14,7 +14,7 @@ struct GradientEditor {
     selected: usize,
 }
 
-pub fn gradient_editor(ui: &mut Ui, gradient: &mut Gradient<Oklab>) -> bool {
+pub fn gradient_editor(ui: &mut Ui, gradient: &mut Gradient<Oklab>, insertible: bool) -> bool {
     let id = Id::new("gradient_editor");
     let mut editor = ui
         .memory_mut(|x| x.data.get_persisted::<GradientEditor>(id))
@@ -22,7 +22,7 @@ pub fn gradient_editor(ui: &mut Ui, gradient: &mut Gradient<Oklab>) -> bool {
 
     let mut changed = false;
 
-    changed |= gradient_handles(ui, gradient, &mut editor).changed();
+    changed |= gradient_handles(ui, gradient, &mut editor, insertible).changed();
 
     let mut handle = gradient.colors[editor.selected];
     let mut t = handle.0;
@@ -104,6 +104,7 @@ fn gradient_handles(
     ui: &mut Ui,
     gradient: &mut Gradient<Oklab>,
     editor: &mut GradientEditor,
+    insertible: bool,
 ) -> Response {
     #![allow(clippy::identity_op)]
 
@@ -135,7 +136,7 @@ fn gradient_handles(
     };
 
     if let Some(mpos) = response.interact_pointer_pos() {
-        if response.double_clicked() {
+        if insertible && response.double_clicked() {
             let t = remap_clamp(mpos.x, rect.left()..=rect.right(), min..=max);
             let color = gradient.monotone_sample(t);
 
@@ -148,7 +149,7 @@ fn gradient_handles(
                 editor.selected = x;
                 response.mark_changed();
             }
-        } else if response.secondary_clicked() {
+        } else if insertible && response.secondary_clicked() {
             if let Some(x) = hovered {
                 if !is_fixed(x, gradient) {
                     gradient.colors.remove(x);

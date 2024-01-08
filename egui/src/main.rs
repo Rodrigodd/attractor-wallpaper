@@ -1308,7 +1308,7 @@ impl MyUiExt for Ui {
     fn my_gradient_picker(&mut self, gradient: &mut Gradient<Oklab>) -> bool {
         let ui = self;
 
-        widgets::gradient::gradient_editor(ui, gradient)
+        widgets::gradient::gradient_editor(ui, gradient, false)
     }
 
     fn my_field<T>(
