@@ -336,7 +336,7 @@ fn find_gamut_intersection(a: f32, b: f32, l1: f32, c1: f32, l0: f32) -> f32 {
 }
 
 pub fn gamut_clip_preserve_chroma(rgb: LinSrgb) -> LinSrgb {
-    if rgb.r < 1.0 && rgb.g < 1.0 && rgb.b < 1.0 && rgb.r > 0.0 && rgb.g > 0.0 && rgb.b > 0.0 {
+    if rgb.r < 1.0 && rgb.g < 1.0 && rgb.b < 1.0 && rgb.r >= 0.0 && rgb.g >= 0.0 && rgb.b >= 0.0 {
         return rgb;
     }
 

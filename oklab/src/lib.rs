@@ -56,11 +56,11 @@ impl Srgb {
     /// chroma into the sRGB gamut. Lightness outside of the sRGB gamut will be clipped to 0.0 or
     /// 1.0.
     pub fn clip(self) -> Srgb {
-        if self.r > 0.0
+        if self.r >= 0.0
             && self.r < 1.0
-            && self.g > 0.0
+            && self.g >= 0.0
             && self.g < 1.0
-            && self.b > 0.0
+            && self.b >= 0.0
             && self.b < 1.0
         {
             return self;
