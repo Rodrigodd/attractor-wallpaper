@@ -171,6 +171,7 @@ pub struct OkHsv {
 
 /// Represents a color in the sRGB color space, with 8 bits per channel.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Default)]
 pub struct Srgb8 {
     /// Red component, in the range [0, 255]
     pub r: u8,
