@@ -335,13 +335,19 @@ impl From<Oklab> for OkLch {
 impl From<OkHsl> for OkLch {
     fn from(okhsl: OkHsl) -> Self {
         let oklab = ok_color::okhsl_to_oklab(okhsl);
-        ok_color::oklab_to_oklch(oklab)
+        let mut oklch = ok_color::oklab_to_oklch(oklab);
+        // make sure to preserve the hue
+        oklch.h = okhsl.h;
+        oklch
     }
 }
 impl From<OkHsv> for OkLch {
     fn from(okhsv: OkHsv) -> Self {
         let oklab = ok_color::okhsv_to_oklab(okhsv);
-        ok_color::oklab_to_oklch(oklab)
+        let mut oklch = ok_color::oklab_to_oklch(oklab);
+        // make sure to preserve the hue
+        oklch.h = okhsv.h;
+        oklch
     }
 }
 
@@ -366,7 +372,10 @@ impl From<Oklab> for OkHsl {
 impl From<OkLch> for OkHsl {
     fn from(okclh: OkLch) -> Self {
         let oklab = ok_color::oklch_to_oklab(okclh);
-        ok_color::oklab_to_okhsl(oklab)
+        let mut okhsl = ok_color::oklab_to_okhsl(oklab);
+        // make sure to preserve the hue
+        okhsl.h = okclh.h;
+        okhsl
     }
 }
 impl From<OkHsv> for OkHsl {
@@ -397,7 +406,10 @@ impl From<Oklab> for OkHsv {
 impl From<OkLch> for OkHsv {
     fn from(okclh: OkLch) -> Self {
         let oklab = ok_color::oklch_to_oklab(okclh);
-        ok_color::oklab_to_okhsv(oklab)
+        let mut okhsv = ok_color::oklab_to_okhsv(oklab);
+        // make sure to preserve the hue
+        okhsv.h = okclh.h;
+        okhsv
     }
 }
 impl From<OkHsl> for OkHsv {
