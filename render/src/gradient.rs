@@ -11,11 +11,19 @@ pub struct Gradient<T> {
 /// 4 coefficients for the cubic spline in each dimension.
 type SplineCoefs = Vec<(f32, [f32; 4], [f32; 4], [f32; 4])>;
 
-impl<T: std::ops::Mul<f32, Output = T> + std::ops::Add<Output = T>> Gradient<T> {
+impl<T> Gradient<T> {
     pub fn new(colors: Vec<(f32, T)>) -> Self {
         Self { colors }
     }
 
+    pub fn map<U>(&self, mut f: impl FnMut(&T) -> U) -> Gradient<U> {
+        Gradient {
+            colors: self.colors.iter().map(|(t, c)| (*t, f(c))).collect(),
+        }
+    }
+}
+
+impl<T: std::ops::Mul<f32, Output = T> + std::ops::Add<Output = T>> Gradient<T> {
     /// Sample the gradient at `t` using linear interpolation.
     pub fn linear_sample(&self, t: f32) -> T
     where

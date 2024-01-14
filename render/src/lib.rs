@@ -44,11 +44,34 @@ pub enum Multithreading {
     MergeMulti,
 }
 
+#[cfg(feature = "serde")]
+mod gradient_serde {
+    use super::Gradient;
+    use serde::{Deserialize, Serialize};
+
+    pub fn serialize<S>(gradient: &Gradient<oklab::Oklab>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let gradient = gradient.map(|x| oklab::Srgb::from(*x).to_srgb8());
+        gradient.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Gradient<oklab::Oklab>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let gradient = <Gradient<oklab::Srgb8>>::deserialize(deserializer)?;
+        Ok(gradient.map(|x| x.to_f32().into()))
+    }
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Theme {
     pub background_color_1: OkLch,
     pub background_color_2: OkLch,
+    #[cfg_attr(feature = "serde", serde(with = "gradient_serde"))]
     pub gradient: Gradient<Oklab>,
 }
 
@@ -77,6 +100,7 @@ pub struct AttractorConfig {
     pub theme_name: String,
     pub background_color_1: OkLch,
     pub background_color_2: OkLch,
+    #[cfg_attr(feature = "serde", serde(with = "gradient_serde"))]
     pub gradient: Gradient<Oklab>,
 }
 impl Clone for AttractorConfig {
