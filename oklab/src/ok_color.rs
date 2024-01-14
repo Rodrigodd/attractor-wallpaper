@@ -757,6 +757,10 @@ pub fn oklab_to_oklch(lab: Oklab) -> OkLch {
 pub fn oklab_to_okhsv(lab: Oklab) -> OkHsv {
     let OkLch { l, c, h } = oklab_to_oklch(lab);
 
+    if l == 0.0 && c == 0.0 {
+        return OkHsv { h, s: 0.0, v: 0.0 };
+    }
+
     let (a_, b_) = if c == 0.0 {
         (1.0, 0.0)
     } else {
@@ -983,6 +987,22 @@ mod test {
         let okhsv = OkHsv::from(oklch);
 
         println!("{:?}", oklch);
+        println!("{:?}", okhsv);
+
+        assert!(!okhsv.h.is_nan());
+        assert!(!okhsv.s.is_nan());
+        assert!(!okhsv.v.is_nan());
+    }
+
+    #[test]
+    fn zero_oklab_to_okhsv() {
+        let oklab = Oklab {
+            l: 0.0,
+            a: 0.0,
+            b: 0.0,
+        };
+        let okhsv = ok_color::oklab_to_okhsv(oklab);
+
         println!("{:?}", okhsv);
 
         assert!(!okhsv.h.is_nan());
