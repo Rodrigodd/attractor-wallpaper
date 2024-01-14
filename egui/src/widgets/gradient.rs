@@ -1,17 +1,61 @@
 use egui::{
     lerp, pos2, remap_clamp, vec2, Color32, Id, Mesh, Response, Rgba, Sense, Shape, Stroke, Ui,
 };
-use oklab::{Oklab, Srgb};
+use oklab::{OkLch, Oklab, Srgb};
 use render::gradient::Gradient;
 
 use crate::{widgets::ok_picker::ToColor32, MyUiExt};
 
 const N: u32 = 256;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug)]
+struct LruCache<K, V> {
+    values: Vec<(K, V)>,
+    capacity: usize,
+}
+impl<K, V> LruCache<K, V> {
+    fn new(capacity: usize) -> Self {
+        Self {
+            values: Vec::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    fn get_or_insert_with(&mut self, key: K, f: impl FnOnce() -> V) -> (&mut K, &mut V)
+    where
+        K: Clone + PartialEq + std::fmt::Debug,
+        V: std::fmt::Debug,
+    {
+        if let Some((key, value)) = self.values.iter_mut().rev().find(|(k, _)| k == &key) {
+            // HACK: avoid limitation of borrow checker
+            unsafe { std::mem::transmute((key, value)) }
+        } else {
+            let value = f();
+            self.values.push((key, value));
+            if self.values.len() > self.capacity {
+                self.values.remove(0);
+            }
+            let (key, value) = self.values.last_mut().unwrap();
+            (key, value)
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct GradientEditor {
     /// The index of the selected handle.
     selected: usize,
+    /// Cache color conversions to avoid losing continuity in non-injective conversions.
+    cache: LruCache<Oklab, OkLch>,
+}
+
+impl Default for GradientEditor {
+    fn default() -> Self {
+        Self {
+            selected: Default::default(),
+            cache: LruCache::new(2),
+        }
+    }
 }
 
 pub fn gradient_editor(ui: &mut Ui, gradient: &mut Gradient<Oklab>, insertible: bool) -> bool {
@@ -29,10 +73,13 @@ pub fn gradient_editor(ui: &mut Ui, gradient: &mut Gradient<Oklab>, insertible: 
 
     ui.horizontal(|ui| {
         ui.label("Color:");
-        let mut color = handle.1.into();
-        if ui.my_color_picker(&mut color).changed() {
+        let (key, color) = editor
+            .cache
+            .get_or_insert_with(handle.1, || handle.1.into());
+        if ui.my_color_picker(color).changed() {
             changed |= true;
-            handle.1 = color.into();
+            *key = Srgb::from(*color).clip().into();
+            handle.1 = *key;
         }
     });
 
@@ -50,17 +97,7 @@ pub fn gradient_editor(ui: &mut Ui, gradient: &mut Gradient<Oklab>, insertible: 
             .changed();
     });
 
-    let color32 = handle.1.to_color32();
-
     if changed {
-        handle.0 = t;
-        handle.1 = Srgb::new(
-            color32.r() as f32 / 255.0,
-            color32.g() as f32 / 255.0,
-            color32.b() as f32 / 255.0,
-        )
-        .into();
-
         gradient.colors[editor.selected] = handle;
 
         if !fixed {
