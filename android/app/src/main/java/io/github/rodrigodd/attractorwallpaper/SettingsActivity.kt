@@ -44,6 +44,9 @@ class SettingsActivity : AppCompatActivity() {
         private var intensityPref: SeekBarPreference? = null
         private var minAreaPref: SeekBarPreference? = null
         private var setWallpaperPref: Preference? = null
+        private var themePref: Preference? = null
+        private var background_color1: ColorPreference? = null
+        private var background_color2: ColorPreference? = null
 
         override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
             setPreferencesFromResource(R.xml.preferences, rootKey)
@@ -52,6 +55,9 @@ class SettingsActivity : AppCompatActivity() {
             intensityPref = findPreference("intensity")!!
             minAreaPref = findPreference("min_area")!!
             setWallpaperPref = findPreference("set_wallpaper_button")!!
+            themePref = findPreference("theme")!!
+            background_color1 = findPreference("background_color1")!!
+            background_color2 = findPreference("background_color2")!!
         }
 
         override fun onPause() {
@@ -144,6 +150,25 @@ class SettingsActivity : AppCompatActivity() {
                             R.string.pref_min_area_sum,
                             minArea
                         )
+                }
+
+                "theme" -> {
+                    val theme = sharedPreferences.getString(key, "Unknown")
+                    themePref?.summary =
+                        resources.getString(
+                            R.string.pref_theme_sum,
+                            theme
+                        )
+                }
+
+                "background_color1" -> {
+                    val color = sharedPreferences.getInt(key, 0)
+                    background_color1?.color = color
+                }
+
+                "background_color2" -> {
+                    val color = sharedPreferences.getInt(key, 0)
+                    background_color2?.color = color
                 }
             }
         }

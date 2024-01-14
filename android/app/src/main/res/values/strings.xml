@@ -16,4 +16,5 @@
     <string name="prefs_theme">Theme</string>
     <string name="prefs_background_color1">Background Color 1</string>
     <string name="prefs_background_color2">Background Color 2</string>
+    <string name="pref_theme_sum">%s\n</string>
 </resources>

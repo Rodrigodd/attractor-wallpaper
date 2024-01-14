@@ -1,10 +1,10 @@
 use android_logger::FilterBuilder;
-use oklab::{OkLch, Oklab};
+use oklab::{OkLch, Oklab, Srgb8};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use render::gradient::Gradient;
 use render::{
     render_to_bitmap, update_render, AttractorConfig, AttractorCtx, AttractorMess,
-    AttractorRenderer, SurfaceState, WgpuState,
+    AttractorRenderer, SurfaceState, Theme, WgpuState,
 };
 
 use std::{
@@ -77,6 +77,7 @@ enum Event {
     Destroyed,
     Redraw,
     UpdateConfig(ConfigKey),
+    UpdateTheme(Theme),
 }
 
 struct Context {
@@ -143,6 +144,51 @@ fn on_update_config_int(ctx: &Context, key: &str, value: i32) {
     };
     ctx.sender
         .send(Event::UpdateConfig(config_key))
+        .expect("event channel");
+}
+
+fn u32_to_srgb8(color: u32) -> Srgb8 {
+    let color = color.to_be_bytes();
+    let color = [color[1], color[2], color[3]];
+    Srgb8::from(color)
+}
+
+fn on_update_theme(ctx: &Context, theme: &[u8]) {
+    // deserialize the theme:
+    // [ background_color1:u32, background_color2:u32, [ t:f32, color:u32][5]]
+
+    let mut offset = 0;
+    let background_color_1 = u32::from_le_bytes(theme[offset..offset + 4].try_into().unwrap());
+    offset += 4;
+    let background_color_2 = u32::from_le_bytes(theme[offset..offset + 4].try_into().unwrap());
+    offset += 4;
+
+    let background_color_1 = u32_to_srgb8(background_color_1);
+    let background_color_2 = u32_to_srgb8(background_color_2);
+
+    let mut gradient = [(0.0, Oklab::new(0.0, 0.0, 0.0)); 5];
+
+    for (_, entry) in gradient.iter_mut().enumerate() {
+        let t = f32::from_le_bytes(theme[offset..offset + 4].try_into().unwrap());
+        offset += 4;
+        let color = u32::from_le_bytes(theme[offset..offset + 4].try_into().unwrap());
+        offset += 4;
+
+        let color = u32_to_srgb8(color);
+
+        *entry = (t, Oklab::from(color.to_f32()));
+    }
+
+    let gradient = Gradient::new(gradient.to_vec());
+
+    let theme = Theme {
+        background_color_1: background_color_1.to_f32().into(),
+        background_color_2: background_color_2.to_f32().into(),
+        gradient,
+    };
+
+    ctx.sender
+        .send(Event::UpdateTheme(theme))
         .expect("event channel");
 }
 
@@ -324,6 +370,26 @@ fn main_loop(
                             config.background_color_2,
                         );
                     }
+                }
+                // wait for the attractor to update to start redrawing
+                recv_bitmap.recv(|_| {});
+            }
+            Event::UpdateTheme(theme) => {
+                redraw = true;
+                log::debug!("Updating theme: {:?}", theme);
+                {
+                    let mut config = config.lock();
+                    config.gradient = theme.gradient;
+                    config.background_color_1 = theme.background_color_1;
+                    config.background_color_2 = theme.background_color_2;
+                    update_render(
+                        &mut render_state.attractor_renderer,
+                        &render_state.wgpu_state,
+                        &config.gradient,
+                        config.multisampling,
+                        config.background_color_1,
+                        config.background_color_2,
+                    );
                 }
                 // wait for the attractor to update to start redrawing
                 recv_bitmap.recv(|_| {});

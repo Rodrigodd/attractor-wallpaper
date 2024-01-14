@@ -168,3 +168,35 @@ fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurfaceView_nativeGetWal
 
     bitmap_obj
 }
+
+// #nativeUpdateTheme(ctx: Long, theme: ByteBuffer)
+#[no_mangle]
+fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurfaceView_nativeUpdateTheme(
+    env: JNIEnv,
+    _: JClass,
+    ctx: jlong,
+    theme: jni::objects::JByteBuffer,
+) {
+    let ctx = ctx as *mut super::Context;
+    log::debug!("nativeUpdateTheme: {:p} {:?}", ctx, theme);
+
+    let ptr = env.get_direct_buffer_address(&theme);
+    let len = env.get_direct_buffer_capacity(&theme);
+
+    let (ptr, len) = match (ptr, len) {
+        (Ok(ptr), Ok(len)) => {
+            log::debug!("theme: {:p} {}", ptr, len);
+            (ptr, len)
+        }
+        err => {
+            log::error!("Failed to get theme pointer/length: {:?}", err);
+            return;
+        }
+    };
+
+    let theme = unsafe { std::slice::from_raw_parts(ptr as *const u8, len as usize) };
+
+    unsafe {
+        super::on_update_theme(&*ctx, theme);
+    }
+}
