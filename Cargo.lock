@@ -1508,8 +1508,7 @@ dependencies = [
 [[package]]
 name = "ndk"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2076a31b7010b17a38c01907c45b945e8f11495ee4dd588309718901b1f7a5b7"
+source = "git+https://github.com/Rodrigodd/ndk.git?rev=d0b7451054137640cf94103e146f4d39d8e3fd13#d0b7451054137640cf94103e146f4d39d8e3fd13"
 dependencies = [
  "bitflags 2.4.0",
  "jni-sys",
@@ -1539,8 +1538,7 @@ dependencies = [
 [[package]]
 name = "ndk-sys"
 version = "0.5.0+25.2.9519653"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c196769dd60fd4f363e11d948139556a344e79d451aeb2fa2fd040738ef7691"
+source = "git+https://github.com/Rodrigodd/ndk.git?rev=d0b7451054137640cf94103e146f4d39d8e3fd13#d0b7451054137640cf94103e146f4d39d8e3fd13"
 dependencies = [
  "jni-sys",
 ]
@@ -3256,3 +3254,8 @@ checksum = "73ab332fe2f6680068f3582b16a24f90ad7096d5d39b974d1c0aff0125116f02"
 dependencies = [
  "simd-adler32",
 ]
+
+[[patch.unused]]
+name = "glow"
+version = "0.13.0"
+source = "git+https://github.com/grovesNL/glow.git?rev=e33eebf7ab3c0a78c0b3a189393cec51f4004d1d#e33eebf7ab3c0a78c0b3a189393cec51f4004d1d"
