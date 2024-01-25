@@ -12,7 +12,6 @@ use egui_winit::winit::{
     dpi::PhysicalPosition,
     event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
-    platform::wayland::WindowBuilderExtWayland,
     window::{Window, WindowBuilder},
 };
 use oklab::{LinSrgb, OkLch, Oklab};
@@ -28,6 +27,9 @@ use winit::event::{KeyboardInput, ModifiersState, VirtualKeyCode};
 use winit_executor::{TaskId, WinitExecutor};
 
 use crate::widgets::ok_picker::ToColor32;
+
+#[cfg(target = "linux")]
+use egui_winit::winit::platform::wayland::WindowBuilderExtWayland;
 
 pub mod widgets;
 
@@ -397,10 +399,11 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
     let size = egui_winit::winit::dpi::PhysicalSize::<u32>::new(800, 600);
 
     let wb = WindowBuilder::new()
-        .with_title("A fantastic window!")
+        .with_title("Attractor Wallpaper")
         .with_inner_size(size);
 
-    let wb = { wb.with_name("dev", "") };
+    #[cfg(target = "linux")]
+    let wb = { wb.with_name("attractor-wallpaper", "") };
 
     let wb = if fullscreen {
         wb.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)))

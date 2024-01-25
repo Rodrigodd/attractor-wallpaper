@@ -10,5 +10,11 @@ members = [
 ]
 resolver = "2"
 
+[patch.crates-io]
+
+# windows fixes, in `attractor-wallpaper-fixes` branch
+# TODO: update this when "https://github.com/reujab/wallpaper.rs/pull/26" gets merged (if ever).
+wallpaper = { git = "https://github.com/Rodrigodd/wallpaper.rs.git", rev = "5733320aca9349bcf06c727250dac5ec6c6b5f42" }
+
 [profile.dev.package."*"]
 opt-level = 3

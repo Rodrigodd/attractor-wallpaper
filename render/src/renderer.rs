@@ -124,8 +124,8 @@ impl WgpuState {
         window: Option<(W, (u32, u32))>,
     ) -> Result<(Self, Option<SurfaceState<W>>), Box<dyn Error>> {
         let instance = Instance::new(InstanceDescriptor {
-            // backends: Backends::all(),
-            backends: Backends::GL,
+            backends: Backends::all(),
+            // backends: Backends::GL,
             dx12_shader_compiler: Default::default(),
             flags: wgpu::InstanceFlags::debugging(),
             gles_minor_version: wgpu::Gles3MinorVersion::Automatic,

@@ -225,6 +225,7 @@ version = "0.1.0"
 dependencies = [
  "android_logger",
  "attractors",
+ "glow",
  "jni",
  "log",
  "ndk 0.8.0",
@@ -1037,9 +1038,12 @@ dependencies = [
 
 [[package]]
 name = "glow"
-version = "0.13.0"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd348e04c43b32574f2de31c8bb397d96c9fcfa1371bd4ca6d8bdc464ab121b1"
 dependencies = [
  "js-sys",
+ "log",
  "slotmap",
  "wasm-bindgen",
  "web-sys",
@@ -2542,13 +2546,13 @@ dependencies = [
 
 [[package]]
 name = "wallpaper"
-version = "3.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0547c84bf49b1096b20ce49736b86cd27f8225fc426665d3fba19e71e44c4d46"
+version = "4.0.0"
+source = "git+https://github.com/Rodrigodd/wallpaper.rs.git?rev=5733320aca9349bcf06c727250dac5ec6c6b5f42#5733320aca9349bcf06c727250dac5ec6c6b5f42"
 dependencies = [
  "dirs",
  "enquote",
  "rust-ini",
+ "thiserror",
  "winapi",
  "winreg",
 ]
