@@ -302,7 +302,9 @@ impl AttractorRenderer {
         let uniforms = Uniforms {
             screen_width: size.0,
             screen_height: size.1,
-            _padding: [0; 8],
+            intensity: 1.0,
+            exponent: 1.0,
+            _padding: [0; 0],
             bg_color_1: [0.012, 0.0, 0.0, 1.0],
             bg_color_2: [0.004, 0.0, 0.0, 1.0],
             bg_point_1: [1.0, 0.0],
@@ -508,6 +510,22 @@ impl AttractorRenderer {
             bytemuck::cast_slice(colormap.as_slice()),
         );
     }
+
+    #[allow(clippy::ptr_eq)]
+    pub fn set_intensity(&self, queue: &Queue, intensity: f32, exponent: f32) {
+        // check that fields are consecutive in memory
+        assert!({
+            let intensity = bytemuck::offset_of!(Uniforms, intensity) as u64;
+            let exponent = bytemuck::offset_of!(Uniforms, exponent) as u64;
+            exponent - intensity == size_of_field(&|x: Uniforms| x.intensity) as u64
+        });
+
+        queue.write_buffer(
+            &self.uniforms_buffer,
+            bytemuck::offset_of!(Uniforms, intensity) as u64,
+            bytemuck::cast_slice(&[intensity, exponent]),
+        );
+    }
 }
 
 fn gen_aggreate_buffer(device: &Device, size: (u32, u32), multisampling: u8) -> wgpu::Buffer {
@@ -549,12 +567,14 @@ fn create_bind_group(
     })
 }
 
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Copy, Clone, Default, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
     screen_width: u32,
     screen_height: u32,
-    _padding: [u8; 8], // the next field is 16 bytes aligned
+    intensity: f32,
+    exponent: f32,
+    _padding: [u8; 0], // the next field is 16 bytes aligned
     bg_color_1: [f32; 4],
     bg_color_2: [f32; 4],
     bg_point_1: [f32; 2],

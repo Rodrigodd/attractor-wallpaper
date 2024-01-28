@@ -15,6 +15,7 @@
   "multisampling": 1,
   "anti_aliasing": "None",
   "intensity": 1.0,
+  "exponent": 1.0,
   "random_start": false,
   "multithreading": "Single",
   "samples_per_iteration": 100000,

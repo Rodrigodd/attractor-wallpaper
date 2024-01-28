@@ -202,8 +202,14 @@ struct GuiState {
     /// This aliasing is done before applying the color gradient, so it causes artifacts around
     /// lines. Not recommended.
     anti_aliasing: AntiAliasing,
-    /// A multiplier for the intensity of each pixel before applying the color gradient.
+    /// A multiplier for the intensity of each pixel before applying the color gradient. A lower
+    /// value will make the attractor darker, while a higher value will make the attractor
+    /// brighter.
     intensity: f32,
+    /// A exponentiation applied to the intensity of each pixel before applying the color gradient.
+    /// A lower value will make the gradient more uniform, while a higher value will make the
+    /// gradient more sharp.
+    exponent: f32,
     dragging: bool,
     rotating: bool,
     last_cursor_position: PhysicalPosition<f64>,
@@ -358,6 +364,8 @@ fn run_headless(mut config: AttractorConfig, mut cli: cli::Cli) {
         multisampling,
         anti_aliasing,
         gradient,
+        intensity,
+        exponent,
         background_color_1,
         background_color_2,
         transform: (mat, _),
@@ -376,6 +384,8 @@ fn run_headless(mut config: AttractorConfig, mut cli: cli::Cli) {
             gradient,
             background_color_1,
             background_color_2,
+            intensity,
+            exponent,
         )
         .await;
 
@@ -469,6 +479,8 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                     gui_state.multisampling,
                     gui_state.background_color_1,
                     gui_state.background_color_2,
+                    gui_state.intensity,
+                    gui_state.exponent,
                 );
                 render_state = Some(RenderState {
                     wgpu_state,
@@ -656,7 +668,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                         return;
                     }
 
-                    let base_intensity = config.base_intensity as f32 / config.intensity;
+                    let base_intensity = config.base_intensity as f32;
                     let total_samples = at.total_samples;
                     let anti_aliasing = config.anti_aliasing;
                     let mat = config.transform.0;
@@ -841,9 +853,29 @@ fn build_ui(
                     .changed()
                 {
                     let _ = attractor_sender.send(AttractorMess::SetIntensity(gui_state.intensity));
+                    render_state.attractor_renderer.set_intensity(
+                        &render_state.wgpu_state.queue,
+                        gui_state.intensity,
+                        gui_state.exponent,
+                    );
                 }
             })
             .doc("intensity");
+
+            ui.my_field("exponent:", |ui| {
+                if ui
+                    .add(Slider::new(&mut gui_state.exponent, 0.1..=2.0))
+                    .changed()
+                {
+                    let _ = attractor_sender.send(AttractorMess::SetExponent(gui_state.exponent));
+                    render_state.attractor_renderer.set_intensity(
+                        &render_state.wgpu_state.queue,
+                        gui_state.intensity,
+                        gui_state.exponent,
+                    );
+                }
+            })
+            .doc("exponent");
 
             ui.my_field("random start:", |ui| {
                 if ui
@@ -931,6 +963,8 @@ fn build_ui(
                                 gui_state.multisampling,
                                 gui_state.background_color_1,
                                 gui_state.background_color_2,
+                                gui_state.intensity,
+                                gui_state.exponent,
                             );
                         }
                     });
@@ -1078,6 +1112,8 @@ fn build_ui(
                     base_intensity,
                     multisampling,
                     anti_aliasing,
+                    intensity,
+                    exponent,
                     gradient,
                     background_color_1,
                     background_color_2,
@@ -1097,6 +1133,8 @@ fn build_ui(
                         gradient,
                         background_color_1,
                         background_color_2,
+                        intensity,
+                        exponent,
                     )
                     .await;
 
@@ -1155,6 +1193,8 @@ fn build_ui(
                             gui_state.multisampling,
                             gui_state.background_color_1,
                             gui_state.background_color_2,
+                            gui_state.intensity,
+                            gui_state.exponent,
                         );
                         update_gui_state_from_config(gui_state, &config);
                         drop(config);
@@ -1176,6 +1216,7 @@ fn update_gui_state_from_config(gui_state: &mut GuiState, config: &AttractorConf
     gui_state.multisampling = config.multisampling;
     gui_state.anti_aliasing = config.anti_aliasing;
     gui_state.intensity = config.intensity;
+    gui_state.exponent = config.exponent;
     gui_state.random_start = config.random_start;
     gui_state.samples_per_iteration_text = config.samples_per_iteration.to_string();
     gui_state.multithreading = config.multithreading;

@@ -92,6 +92,7 @@ pub struct AttractorConfig {
     pub multisampling: u8,
     pub anti_aliasing: AntiAliasing,
     pub intensity: f32,
+    pub exponent: f32,
     pub random_start: bool,
     pub multithreading: Multithreading,
     pub samples_per_iteration: u64,
@@ -115,6 +116,7 @@ impl Clone for AttractorConfig {
             multisampling: self.multisampling,
             anti_aliasing: self.anti_aliasing,
             intensity: self.intensity,
+            exponent: self.exponent,
             random_start: self.random_start,
             multithreading: self.multithreading,
             samples_per_iteration: self.samples_per_iteration,
@@ -317,6 +319,10 @@ impl AttractorCtx {
         self.config.lock().intensity = intensity;
     }
 
+    pub fn set_exponent(&mut self, exponent: f32) {
+        self.config.lock().exponent = exponent;
+    }
+
     pub fn set_random_start(&mut self, random_start: bool) {
         self.config.lock().random_start = random_start;
         self.clear();
@@ -347,6 +353,8 @@ pub fn update_render(
     multisampling: u8,
     background_color_1: OkLch,
     background_color_2: OkLch,
+    intensity: f32,
+    exponent: f32,
 ) {
     attractor_renderer.recreate_aggregate_buffer(
         &wgpu_state.device,
@@ -369,6 +377,7 @@ pub fn update_render(
             .map(|x| x.into())
             .collect(),
     );
+    attractor_renderer.set_intensity(&wgpu_state.queue, intensity, exponent);
 }
 
 pub enum AttractorMess {
@@ -377,6 +386,7 @@ pub enum AttractorMess {
     SetMultisampling(u8),
     SetAntialiasing(AntiAliasing),
     SetIntensity(f32),
+    SetExponent(f32),
     SetRandomStart(bool),
     SetMultithreaded(Multithreading),
     SetSamplesPerIteration(u64),
@@ -403,6 +413,7 @@ pub fn attractor_thread(
                         attractor.set_antialiasing(antialising)
                     }
                     AttractorMess::SetIntensity(intensity) => attractor.set_intensity(intensity),
+                    AttractorMess::SetExponent(exponent) => attractor.set_exponent(exponent),
                     AttractorMess::SetRandomStart(random_start) => {
                         attractor.set_random_start(random_start)
                     }
@@ -617,6 +628,8 @@ pub async fn render_to_bitmap(
     gradient: Gradient<Oklab>,
     background_color_1: OkLch,
     background_color_2: OkLch,
+    intensity: f32,
+    exponent: f32,
 ) -> Vec<u8> {
     let wgpu_state = WgpuState::new_headless().await.unwrap();
     let mut attractor_renderer = AttractorRenderer::new(
@@ -637,6 +650,8 @@ pub async fn render_to_bitmap(
         multisampling,
         background_color_1,
         background_color_2,
+        intensity,
+        exponent,
     );
 
     let texture = wgpu_state.new_target_texture(size);

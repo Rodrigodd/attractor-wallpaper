@@ -34,6 +34,8 @@ struct ColorPoint {
 struct Uniforms {
   screenWidth: u32,
   screenHeight: u32,
+  intensity: f32,
+  exponent: f32,
   /// background gradient color 1
   bg_color_1: vec4<f32>,
   /// background gradient color 2
@@ -101,9 +103,9 @@ fn color(c: f32, p: vec2<f32>) -> vec4<f32> {
     //     background = colormap(p.x);
     // }
 
-    let foreground = sample_colormap(c);
-
-    let alpha = clamp(c * 10.0, 0.0, 1.0);
+    var cs = pow(c * uniforms.intensity, uniforms.exponent);
+    let foreground = sample_colormap(cs);
+    let alpha = clamp(cs * 10.0, 0.0, 1.0);
     return mix(background, foreground, alpha);
 }
 
