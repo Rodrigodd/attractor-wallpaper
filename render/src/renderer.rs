@@ -461,19 +461,18 @@ impl AttractorRenderer {
 
     #[allow(clippy::ptr_eq)]
     pub fn update_uniforms(&mut self, queue: &Queue) {
+        // check that fields are consecutive in memory
+        // TODO: replace offset_of by the std::mem::offset_of when it will be stable, and make this
+        // assert a `const _: ()`.
         assert!({
-            let x = Uniforms {
-                screen_width: self.size.0,
-                screen_height: self.size.1,
-                ..Default::default()
-            };
-            (&x as *const Uniforms as usize) == (&x.screen_width as *const u32 as usize)
-                && (&x as *const Uniforms as usize + 4) == (&x.screen_height as *const u32 as usize)
+            let screen_width = bytemuck::offset_of!(Uniforms, screen_width) as u64;
+            let screen_height = bytemuck::offset_of!(Uniforms, screen_height) as u64;
+            screen_height - screen_width == size_of_field(&|x: Uniforms| x.screen_width) as u64
         });
 
         queue.write_buffer(
             &self.uniforms_buffer,
-            0,
+            bytemuck::offset_of!(Uniforms, screen_width) as u64,
             bytemuck::cast_slice(&[self.size.0, self.size.1]),
         );
     }
@@ -485,31 +484,27 @@ impl AttractorRenderer {
         background_color_1: [f32; 4],
         background_color_2: [f32; 4],
     ) {
+        // check that fields are consecutive in memory
         assert!({
-            let x = Uniforms::default();
-            (&x as *const Uniforms as usize) == (&x.screen_width as *const u32 as usize)
-                && (&x as *const Uniforms as usize + 4) == (&x.screen_height as *const u32 as usize)
+            let bg_color_1 = bytemuck::offset_of!(Uniforms, bg_color_1) as u64;
+            let bg_color_2 = bytemuck::offset_of!(Uniforms, bg_color_2) as u64;
+            bg_color_2 - bg_color_1 == size_of_field(&|x: Uniforms| x.bg_color_1) as u64
         });
 
         queue.write_buffer(
             &self.uniforms_buffer,
-            16,
+            bytemuck::offset_of!(Uniforms, bg_color_1) as u64,
             bytemuck::cast_slice(&[background_color_1, background_color_2]),
         );
     }
 
     #[allow(clippy::ptr_eq)]
     pub fn set_colormap(&self, queue: &Queue, colormap: Vec<ColorPoint>) {
-        assert!({
-            let x = Uniforms::default();
-            (&x as *const Uniforms as usize + 64) == (&x.color_map as *const _ as usize)
-        });
-
         assert!(colormap.len() <= 4);
 
         queue.write_buffer(
             &self.uniforms_buffer,
-            64,
+            bytemuck::offset_of!(Uniforms, color_map) as u64,
             bytemuck::cast_slice(colormap.as_slice()),
         );
     }
@@ -789,4 +784,8 @@ fn create_render_pipeline(
     });
 
     Ok(render_pipeline)
+}
+
+const fn size_of_field<T, F>(_: &impl Fn(T) -> F) -> usize {
+    std::mem::size_of::<F>()
 }
