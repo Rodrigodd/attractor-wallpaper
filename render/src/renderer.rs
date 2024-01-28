@@ -512,7 +512,7 @@ impl AttractorRenderer {
     }
 
     #[allow(clippy::ptr_eq)]
-    pub fn set_intensity(&self, queue: &Queue, intensity: f32, exponent: f32) {
+    pub fn set_intensity_exponent(&self, queue: &Queue, intensity: f32, exponent: f32) {
         // check that fields are consecutive in memory
         assert!({
             let intensity = bytemuck::offset_of!(Uniforms, intensity) as u64;
@@ -524,6 +524,24 @@ impl AttractorRenderer {
             &self.uniforms_buffer,
             bytemuck::offset_of!(Uniforms, intensity) as u64,
             bytemuck::cast_slice(&[intensity, exponent]),
+        );
+    }
+
+    #[allow(clippy::ptr_eq)]
+    pub fn set_intensity(&self, queue: &Queue, intensity: f32) {
+        queue.write_buffer(
+            &self.uniforms_buffer,
+            bytemuck::offset_of!(Uniforms, intensity) as u64,
+            bytemuck::cast_slice(&[intensity]),
+        );
+    }
+
+    #[allow(clippy::ptr_eq)]
+    pub fn set_exponent(&self, queue: &Queue, exponent: f32) {
+        queue.write_buffer(
+            &self.uniforms_buffer,
+            bytemuck::offset_of!(Uniforms, exponent) as u64,
+            bytemuck::cast_slice(&[exponent]),
         );
     }
 }

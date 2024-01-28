@@ -853,11 +853,9 @@ fn build_ui(
                     .changed()
                 {
                     let _ = attractor_sender.send(AttractorMess::SetIntensity(gui_state.intensity));
-                    render_state.attractor_renderer.set_intensity(
-                        &render_state.wgpu_state.queue,
-                        gui_state.intensity,
-                        gui_state.exponent,
-                    );
+                    render_state
+                        .attractor_renderer
+                        .set_intensity(&render_state.wgpu_state.queue, gui_state.intensity);
                 }
             })
             .doc("intensity");
@@ -868,11 +866,9 @@ fn build_ui(
                     .changed()
                 {
                     let _ = attractor_sender.send(AttractorMess::SetExponent(gui_state.exponent));
-                    render_state.attractor_renderer.set_intensity(
-                        &render_state.wgpu_state.queue,
-                        gui_state.intensity,
-                        gui_state.exponent,
-                    );
+                    render_state
+                        .attractor_renderer
+                        .set_exponent(&render_state.wgpu_state.queue, gui_state.exponent);
                 }
             })
             .doc("exponent");

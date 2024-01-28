@@ -196,6 +196,11 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2,
                 nativeUpdateConfigInt(nativeCtx, key, value)
             }
 
+            "exponent" -> {
+                val value = pref.getInt(key, 100)
+                nativeUpdateConfigInt(nativeCtx, key, value)
+            }
+
             "min_area" -> {
                 val value = pref.getInt(key, 25)
                 nativeUpdateConfigInt(nativeCtx, key, value)

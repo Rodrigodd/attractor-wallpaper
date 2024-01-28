@@ -377,7 +377,7 @@ pub fn update_render(
             .map(|x| x.into())
             .collect(),
     );
-    attractor_renderer.set_intensity(&wgpu_state.queue, intensity, exponent);
+    attractor_renderer.set_intensity_exponent(&wgpu_state.queue, intensity, exponent);
 }
 
 pub enum AttractorMess {

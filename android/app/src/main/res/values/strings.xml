@@ -6,12 +6,14 @@
     <string name="pref_set_wallpaper">Set as Wallpaper</string>
     <string name="prefs_quality">Quality</string>
     <string name="prefs_intensity">Intensity</string>
+    <string name="prefs_exponent">Exponent</string>
     <string name="prefs_multisampling">Multisampling</string>
     <string name="prefs_attractor">Attractor</string>
     <string name="prefs_seed">Seed</string>
     <string name="pref_seed_sum">%1$s</string>
     <string name="pref_intensity_sum">%4.2f</string>
-    <string name="pref_min_area">Minimun Area</string>
+    <string name="pref_exponent_sum">%4.2f</string>
+    <string name="pref_min_area">Minimum Area</string>
     <string name="pref_min_area_sum">%d %%</string>
     <string name="prefs_theme">Theme</string>
     <string name="prefs_background_color1">Background Color 1</string>

@@ -38,6 +38,15 @@
             app:updatesContinuously="true" />
 
         <SeekBarPreference
+            app:defaultValue="100"
+            app:min="0"
+            android:max="200"
+            app:key="exponent"
+            app:title="@string/prefs_exponent"
+            app:showSeekBarValue="false"
+            app:updatesContinuously="true" />
+
+        <SeekBarPreference
             app:defaultValue="1"
             app:min="1"
             android:max="4"

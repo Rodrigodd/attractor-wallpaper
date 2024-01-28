@@ -66,6 +66,7 @@ enum ConfigKey {
     Seed(u64),
     Multisampling(u8),
     Intensity(f32),
+    Exponent(f32),
     MinArea(f32),
     BackgroundColor1(u32),
     BackgroundColor2(u32),
@@ -134,6 +135,7 @@ fn on_update_config_int(ctx: &Context, key: &str, value: i32) {
         "seed" => ConfigKey::Seed(value as u64),
         "multisampling" => ConfigKey::Multisampling(value as u8),
         "intensity" => ConfigKey::Intensity(value as f32 / 100.0),
+        "exponent" => ConfigKey::Exponent(value as f32 / 100.0),
         "min_area" => ConfigKey::MinArea(value as f32 / 100.0),
         "background_color1" => ConfigKey::BackgroundColor1(value as u32),
         "background_color2" => ConfigKey::BackgroundColor2(value as u32),
@@ -241,6 +243,7 @@ fn init_attractor(
         transform: ([1.0, 0.0, 0.0, 1.0], [0.0, 0.0]),
 
         intensity: 1.0,
+        exponent: 1.0,
         samples_per_iteration: 100_000,
         multisampling: 1,
 
@@ -266,6 +269,8 @@ fn init_attractor(
         attractor_config.multisampling,
         attractor_config.background_color_1,
         attractor_config.background_color_2,
+        attractor_config.intensity,
+        attractor_config.exponent,
     );
 
     let attractor_config = Arc::new(Mutex::new(attractor_config));
@@ -335,6 +340,15 @@ fn main_loop(
                     }
                     ConfigKey::Intensity(intensity) => {
                         let _ = attractor_sender.send(AttractorMess::SetIntensity(intensity));
+                        render_state
+                            .attractor_renderer
+                            .set_intensity(&render_state.wgpu_state.queue, intensity);
+                    }
+                    ConfigKey::Exponent(exponent) => {
+                        let _ = attractor_sender.send(AttractorMess::SetExponent(exponent));
+                        render_state
+                            .attractor_renderer
+                            .set_exponent(&render_state.wgpu_state.queue, exponent);
                     }
                     ConfigKey::MinArea(min_area) => {
                         let min_area = (min_area * 4096.0).round() as u16;
@@ -353,6 +367,8 @@ fn main_loop(
                             config.multisampling,
                             config.background_color_1,
                             config.background_color_2,
+                            config.intensity,
+                            config.exponent,
                         );
                     }
                     ConfigKey::BackgroundColor2(color) => {
@@ -368,6 +384,8 @@ fn main_loop(
                             config.multisampling,
                             config.background_color_1,
                             config.background_color_2,
+                            config.intensity,
+                            config.exponent,
                         );
                     }
                 }
@@ -389,6 +407,8 @@ fn main_loop(
                         config.multisampling,
                         config.background_color_1,
                         config.background_color_2,
+                        config.intensity,
+                        config.exponent,
                     );
                 }
                 // wait for the attractor to update to start redrawing
@@ -421,7 +441,7 @@ fn main_loop(
                         return;
                     }
 
-                    let base_intensity = config.base_intensity as f32 / config.intensity;
+                    let base_intensity = config.base_intensity as f32;
                     let total_samples = at.total_samples;
                     let anti_aliasing = config.anti_aliasing;
                     let mat = config.transform.0;
@@ -566,6 +586,8 @@ fn render_wallpaper(config: AttractorConfig) -> Vec<u8> {
         base_intensity,
         multisampling,
         anti_aliasing,
+        intensity,
+        exponent,
         gradient,
         background_color_1,
         background_color_2,
@@ -585,6 +607,8 @@ fn render_wallpaper(config: AttractorConfig) -> Vec<u8> {
             gradient,
             background_color_1,
             background_color_2,
+            intensity,
+            exponent,
         )
         .await;
 

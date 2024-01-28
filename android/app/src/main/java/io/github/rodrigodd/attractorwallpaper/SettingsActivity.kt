@@ -42,6 +42,7 @@ class SettingsActivity : AppCompatActivity() {
 
         private var seedPref: EditTextPreference? = null
         private var intensityPref: SeekBarPreference? = null
+        private var exponentPref: SeekBarPreference? = null
         private var minAreaPref: SeekBarPreference? = null
         private var setWallpaperPref: Preference? = null
         private var themePref: Preference? = null
@@ -53,6 +54,7 @@ class SettingsActivity : AppCompatActivity() {
 
             seedPref = findPreference("seed")!!
             intensityPref = findPreference("intensity")!!
+            exponentPref = findPreference("exponent")!!
             minAreaPref = findPreference("min_area")!!
             setWallpaperPref = findPreference("set_wallpaper_button")!!
             themePref = findPreference("theme")!!
@@ -140,6 +142,15 @@ class SettingsActivity : AppCompatActivity() {
                         resources.getString(
                             R.string.pref_intensity_sum,
                             intensity.toFloat() / 100.0
+                        )
+                }
+
+                "exponent" -> {
+                    val exponent = sharedPreferences.getInt(key, 25)
+                    exponentPref?.summary =
+                        resources.getString(
+                            R.string.pref_exponent_sum,
+                            exponent.toFloat() / 100.0
                         )
                 }
 
