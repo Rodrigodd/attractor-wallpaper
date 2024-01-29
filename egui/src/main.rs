@@ -61,6 +61,17 @@ mod cli {
         #[arg(long, default_value = "512")]
         pub min_area: u16,
 
+        /// A multiplier for the intensity of each pixel before applying the color gradient. A
+        /// lower value will make the attractor darker, while a higher value will make the
+        /// attractor brighter.
+        #[arg(long, default_value = "1.0")]
+        pub intensity: f32,
+        /// A exponentiation applied to the intensity of each pixel before applying the color
+        /// gradient. A lower value will make the gradient more uniform, while a higher value will
+        /// make the gradient more sharp.
+        #[arg(long, default_value = "1.0")]
+        pub exponent: f32,
+
         /// Render the attractor into a buffer with both dimensions scaled by this factor, and them
         /// downsample it to the expected size. Used for anti-aliasing.
         #[arg(short, long, default_value = "1")]
@@ -279,6 +290,8 @@ fn main() {
             anti_aliasing,
             seed,
             min_area,
+            intensity,
+            exponent,
             multisampling,
             output: _,
             dimensions: _,
@@ -296,6 +309,9 @@ fn main() {
         } else {
             config.set_seed(rand::random::<u64>() % 1_000_000);
         }
+
+        config.intensity = *intensity;
+        config.exponent = *exponent;
 
         config.resize(config.size, *multisampling);
 
