@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Image Processing</title>
+    <style>
+        canvas {
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+    </style>
+</head>
+<body>
+
+<select id="shapeType" onchange="generateImage()">
+    <option value="gradient">Gradient</option>
+    <option value="diagonal">Diagonal</option>
+    <option value="circle">Circle</option>
+    <option value="wide">Dark Gradient</option>
+    <option value="darkcircle">Dark Circle</option>
+</select>
+
+<select id="ditherType" onchange="generateImage()">
+    <option value="fast">Fast</option>
+    <option value="fastblue">Fast Blue noise</option>
+    <option value="random">Random</option>
+    <option value="ordered">Ordered 2x2</option>
+    <option value="floyd">Floyd-Steinberg</option>
+</select>
+
+<!-- Container for displaying images -->
+<div id="imageContainer"></div>
+
+<input type="number" id="ditherValue" value="103" onchange="generateImage()"/>
+<input type="number" id="matrixSize" value="1" min="1" onchange="generateImage()"/>
+
+<!-- JavaScript code -->
+<script>
+    // Function to display image on canvas
+    function showImage(array) {
+        let container = document.getElementById("imageContainer");
+
+        // Create a new canvas element
+        let canvas = document.createElement("canvas");
+        canvas.width = 512;
+        canvas.height = 512;
+        container.appendChild(canvas);
+
+        let ctx = canvas.getContext("2d");
+
+        let imgData = ctx.createImageData(array[0].length, array.length);
+        for (let i = 0; i < array.length; i++) {
+            for (let j = 0; j < array[i].length; j++) {
+                let index = (i * array[i].length + j) * 4;
+                imgData.data[index] = array[i][j];
+                imgData.data[index + 1] = array[i][j];
+                imgData.data[index + 2] = array[i][j];
+                imgData.data[index + 3] = 255;
+            }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+    }
+
+    function sampleBayer(x, y, order) {
+        if (order <= 1) {
+            return 0;
+        }
+
+        let mn = sampleBayer(x % (order / 2), y % (order / 2), order / 2);
+        let d = [0, 2, 3, 1][((x >= order / 2) << 1) | (y >= order / 2)];
+        return 4 * mn + d;
+    }
+
+    function generateBayerMatrix(size) {
+        if (!Number.isInteger(size) || size <= 0) {
+            console.error("Invalid matrix size. Please provide a positive integer.");
+            return null;
+        }
+
+
+        // Normalizing the matrix values to be between 0 and 1
+        function normalizeMatrix(matrix, maxValue) {
+            const normalizedMatrix = matrix.map(row => row.map(val => val / maxValue));
+            return normalizedMatrix;
+        }
+
+        // Creating the Bayer matrix
+        const order = Math.pow(2, Math.ceil(Math.log2(size)));
+
+        let bayerMatrix = new Array(order).fill(0).map(() => new Array(order).fill(0));
+
+        for (let y = 0; y < order; y++) {
+            for (let x = 0; x < order; x++) {
+                bayerMatrix[y][x] = sampleBayer(x, y, order);
+            }
+        }
+
+        // Normalizing the matrix to be between 0 and 1
+        const maxValue = order * order;
+        const normalizedMatrix = normalizeMatrix(bayerMatrix, maxValue);
+
+        return normalizedMatrix;
+    }
+
+    function generateImage() {
+        // delete all canvas in imageContainer
+        const cont = document.getElementById("imageContainer");
+        while (cont.lastElementChild) {
+            cont.removeChild(cont.lastElementChild);
+        }
+
+        const shape = document.getElementById("shapeType").value;
+        let pos_to_pixel;
+        switch (shape) {
+            case "gradient":
+                pos_to_pixel = (x, y) => {
+                    return x / 2.0;
+                }
+                break;
+            case "diagonal":
+                pos_to_pixel = (x, y) => {
+                    return (x + y) / 4;
+                }
+                break;
+            case "circle":
+                pos_to_pixel = (x, y) => {
+                    x = x - 256;
+                    y = y - 256;
+                    let dist = Math.sqrt(x * x + y * y);
+                    return dist < 256 ? dist : 127.5;
+                }
+                break;
+            case "wide":
+                pos_to_pixel = (x, y) => {
+                    return x / 16.0;
+                }
+                break;
+            case "darkcircle":
+                pos_to_pixel = (x, y) => {
+                    x = x - 256;
+                    y = y - 256;
+                    let dist = Math.sqrt(x * x + y * y);
+                    return dist < 256 ? dist / 8.0 : 16.5;
+                }
+                break;
+        }
+
+        let image = new Array(512).fill(0.0).map((_, y) => {
+            return new Array(512).fill(0.0).map((_, x) => pos_to_pixel(x, y));
+        });
+
+        // Plot the original image
+        showImage(image);
+
+        // Plot the image quantized to 4-bit precision
+        let quantizedImage = image.map(row => row.map(value => Math.round(value / 16) * 16));
+        showImage(quantizedImage);
+
+        // Add dither and quantize the image again
+        let ditherMatrix = new Array(512).fill(0).map(() => new Array(512).fill(0));
+
+        const dither = document.getElementById("ditherType").value;
+        let pos_to_dither;
+        let pattern;
+        switch (dither) {
+            case "fast":
+                const v = document.getElementById("ditherValue").value * 1.0
+                // Based on bevy's dithering implementation: https://github.com/bevyengine/bevy/pull/5264
+                pos_to_dither = (x, y) => {
+                    let dither = 171.0 * x + 231.0 * y;
+                    dither = (dither / v) % 1.0;
+                    return dither - 0.5;
+                }
+                break;
+            case "fastblue":
+                // from: https://www.shadertoy.com/view/tllcR2
+                pos_to_dither = (x, y) => {
+
+                    let hash = (x, y) => {
+                        return (Math.sin(x * 11.9898 + y *78.233) * 43758.5453) % 1.0;
+                    };
+
+                    let v = 0.0;
+                    for (let k = 0; k < 9; k++)
+                        v += hash( x + k%3-1, y + k/3-1); 
+                    return 0.9 * (1.125 * hash(x, y) - v / 8.0) + 0.5; 
+                }
+            case "random":
+                pos_to_dither = (x, y) => {
+                    return Math.random() - 0.5;
+                }
+                break;
+            case "ordered":
+                const size = Math.round(document.getElementById("matrixSize").value * 1.0);
+                if (size > 8) size = 8;
+                pattern = generateBayerMatrix(Math.pow(2, size));
+                const order = pattern.length;
+                pos_to_dither = (x, y) => {
+                    return pattern[x % order][y % order] - 0.5;
+                }
+                break;
+            case "floyd":
+                for (let y = 1; y < 511; y++) {
+                    for (let x = 1; x < 511; x++) {
+                        let pixel = image[x][y] + ditherMatrix[x][y] * 16.0;
+                        let quantized = Math.round(pixel / 16) * 16;
+                        let error = (pixel - quantized) / 8;
+                        ditherMatrix[x+1][y] += error * 7 / 16;
+                        ditherMatrix[x-1][y+1] += error * 3 / 16;
+                        ditherMatrix[x][y+1] += error * 5 / 16;
+                        ditherMatrix[x+1][y+1] += error * 1 / 16;
+                    }
+                }
+                pos_to_dither = (x, y) => {
+                    return ditherMatrix[x][y];
+                }
+                break;
+        }
+
+        for (let y = 0; y < 512; y++) {
+            for (let x = 0; x < 512; x++) {
+                ditherMatrix[x][y] = pos_to_dither(x, y);
+            }
+        }
+
+        let ditheredImage = image.map((row, i) => row.map((value, j) => value + ditherMatrix[i][j] * 16));
+        let quantizedDitheredImage = ditheredImage.map(row => row.map(value => Math.round(value / 16) * 16));
+
+        // Plot the quantized dithered image
+        showImage(quantizedDitheredImage);
+    }
+
+    // Call the image generation function
+    generateImage();
+</script>
+
+</body>
+</html>
+
