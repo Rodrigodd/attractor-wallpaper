@@ -184,6 +184,7 @@ enum UserEvent {
         ),
     ),
     PollTask(TaskId),
+    WallpaperFinishedRendering,
 }
 
 struct RenderState {
@@ -475,6 +476,8 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
 
     let mut modifiers = ModifiersState::empty();
 
+    let proxy = event_loop.create_proxy();
+
     event_loop.run(move |event, _, control_flow| {
         // control_flow is a reference to an enum which tells us how to run the event loop.
         // See the docs for details: https://docs.rs/winit/0.22.2/winit/enum.ControlFlow.html
@@ -664,7 +667,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                     _ => (),
                 }
             }
-            Event::MainEventsCleared => {
+            Event::MainEventsCleared | Event::UserEvent(UserEvent::WallpaperFinishedRendering) => {
                 let mut total_samples = 0;
                 let mut stop_time = Instant::now();
                 recv_bitmap.recv(|at| {
@@ -728,6 +731,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                         .show(ui, |ui| {
                             build_ui(
                                 ui,
+                                &proxy,
                                 &mut gui_state,
                                 &attractor_sender,
                                 &mut recv_bitmap,
@@ -768,6 +772,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
 #[allow(clippy::too_many_arguments)]
 fn build_ui(
     ui: &mut Ui,
+    proxy: &EventLoopProxy<UserEvent>,
     gui_state: &mut GuiState,
     attractor_sender: &Sender<AttractorMess>,
     attractor_recv: &mut render::channel::Receiver<AttractorCtx>,
@@ -1098,8 +1103,10 @@ fn build_ui(
 
                 let multithreaded = gui_state.multithreading;
 
+                let proxy = proxy.clone();
                 let handle = std::thread::spawn(move || {
                     aggregate_buffer(multithreaded, &mut attractor);
+                    let _ = proxy.send_event(UserEvent::WallpaperFinishedRendering);
                     attractor
                 });
 
