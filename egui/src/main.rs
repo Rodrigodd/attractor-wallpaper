@@ -665,7 +665,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                 }
             }
             Event::MainEventsCleared => {
-                let mut total_sampĺes = 0;
+                let mut total_samples = 0;
                 let mut stop_time = Instant::now();
                 recv_bitmap.recv(|at| {
                     let rsize = render_state.attractor_renderer.size;
@@ -689,7 +689,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                     }
 
                     let base_intensity = config.base_intensity as f32;
-                    let total_samples = at.total_samples;
+                    total_samples = at.total_samples;
                     let anti_aliasing = config.anti_aliasing;
                     let mat = config.transform.0;
 
@@ -711,7 +711,6 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                         .attractor_renderer
                         .load_aggregate_buffer(&render_state.wgpu_state.queue, &at.bitmap);
 
-                    total_sampĺes = at.total_samples;
                     last_change = at.last_change;
                     if let Some(x) = at.stop_time {
                         stop_time = x;
@@ -733,7 +732,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                                 &attractor_sender,
                                 &mut recv_bitmap,
                                 &attractor_config,
-                                total_sampĺes,
+                                total_samples,
                                 stop_time - last_change,
                                 exp_moving_avg,
                                 render_state,
