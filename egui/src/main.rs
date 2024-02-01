@@ -646,6 +646,10 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                     }
                     WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                     WindowEvent::Resized(new_size) => {
+                        if new_size.width == 0 || new_size.height == 0 {
+                            return;
+                        }
+
                         let _ = attractor_sender
                             .send(AttractorMess::Resize((new_size.width, new_size.height)));
 
