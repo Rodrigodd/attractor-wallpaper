@@ -31,40 +31,40 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2,
     companion object {
         private const val TAG = "AttractorSurfaceView"
 
-        private val HOT_THEME: Theme = Theme(
-            background_color1 = Color.rgb(25, 0, 0),
-            background_color2 = Color.rgb(40, 0, 0),
-            gradient = arrayOf(
-                Pair(0.00f, Color.rgb(7, 1, 0)),
-                Pair(0.03f, Color.rgb(71, 0, 0)),
-                Pair(0.30f, Color.rgb(188, 0, 1)),
-                Pair(0.75f, Color.rgb(249, 234, 0)),
-                Pair(1.00f, Color.rgb(255, 255, 255))
-            )
-        )
-
-        private val FOREST_THEME: Theme = Theme(
-            background_color1 = Color.rgb(0, 35, 0),
-            background_color2 = Color.rgb(9, 20, 0),
-            gradient = arrayOf(
-                Pair(0.00f, Color.rgb(1, 3, 8)),
-                Pair(0.02f, Color.rgb(2, 39, 34)),
-                Pair(0.30f, Color.rgb(74, 109, 60)),
-                Pair(0.75f, Color.rgb(208, 240, 195)),
-                Pair(1.00f, Color.rgb(91, 250, 0))
+        val THEMES: HashMap<String, Theme> = hashMapOf(
+            "Hot" to Theme(
+                background_color1 = Color.rgb(25, 0, 0),
+                background_color2 = Color.rgb(40, 0, 0),
+                gradient = arrayOf(
+                    Pair(0.00f, Color.rgb(7, 1, 0)),
+                    Pair(0.03f, Color.rgb(71, 0, 0)),
+                    Pair(0.30f, Color.rgb(188, 0, 1)),
+                    Pair(0.75f, Color.rgb(249, 234, 0)),
+                    Pair(1.00f, Color.rgb(255, 255, 255))
+                )
             ),
-        )
-
-        private val COLD_THEME: Theme = Theme(
-            background_color1 = Color.rgb(0, 20, 40),
-            background_color2 = Color.rgb(0, 10, 25),
-            gradient = arrayOf(
-                Pair(0.000f, Color.rgb(1, 3, 8)),
-                Pair(0.025f, Color.rgb(2, 38, 47)),
-                Pair(0.300f, Color.rgb(50, 103, 144)),
-                Pair(0.750f, Color.rgb(175, 241, 255)),
-                Pair(1.000f, Color.rgb(255, 253, 247))
-            )
+            "Forest" to Theme(
+                background_color1 = Color.rgb(0, 35, 0),
+                background_color2 = Color.rgb(9, 20, 0),
+                gradient = arrayOf(
+                    Pair(0.00f, Color.rgb(1, 3, 8)),
+                    Pair(0.02f, Color.rgb(2, 39, 34)),
+                    Pair(0.30f, Color.rgb(74, 109, 60)),
+                    Pair(0.75f, Color.rgb(208, 240, 195)),
+                    Pair(1.00f, Color.rgb(91, 250, 0))
+                ),
+            ),
+            "Cold" to Theme(
+                background_color1 = Color.rgb(0, 20, 40),
+                background_color2 = Color.rgb(0, 10, 25),
+                gradient = arrayOf(
+                    Pair(0.000f, Color.rgb(1, 3, 8)),
+                    Pair(0.025f, Color.rgb(2, 38, 47)),
+                    Pair(0.300f, Color.rgb(50, 103, 144)),
+                    Pair(0.750f, Color.rgb(175, 241, 255)),
+                    Pair(1.000f, Color.rgb(255, 253, 247))
+                )
+            ),
         )
 
         init {
@@ -219,14 +219,10 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2,
 
             "theme" -> {
                 val value = pref.getString(key, "Unknown")
-                val theme = when (value) {
-                    "Hot" -> HOT_THEME
-                    "Forest" -> FOREST_THEME
-                    "Cold" -> COLD_THEME
-                    else -> {
-                        Log.e(TAG, "Unknown theme: $value")
-                        return
-                    }
+
+                val theme = THEMES[value] ?: kotlin.run {
+                    Log.e(TAG, "Unknown theme: $value")
+                    return
                 }
 
                 nativeUpdateTheme(nativeCtx, serializeTheme(theme))

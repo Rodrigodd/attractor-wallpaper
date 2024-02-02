@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.preference.EditTextPreference
+import androidx.preference.ListPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SeekBarPreference
@@ -45,7 +46,7 @@ class SettingsActivity : AppCompatActivity() {
         private var exponentPref: SeekBarPreference? = null
         private var minAreaPref: SeekBarPreference? = null
         private var setWallpaperPref: Preference? = null
-        private var themePref: Preference? = null
+        private var themePref: ListPreference? = null
         private var background_color1: ColorPreference? = null
         private var background_color2: ColorPreference? = null
 
@@ -60,6 +61,9 @@ class SettingsActivity : AppCompatActivity() {
             themePref = findPreference("theme")!!
             background_color1 = findPreference("background_color1")!!
             background_color2 = findPreference("background_color2")!!
+
+            themePref?.entries = AttractorSurfaceView.THEMES.keys.toTypedArray()
+            themePref?.entryValues = themePref?.entries
         }
 
         override fun onPause() {

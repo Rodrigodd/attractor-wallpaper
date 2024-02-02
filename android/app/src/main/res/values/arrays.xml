@@ -9,9 +9,4 @@
         <item>reply</item>
         <item>reply_all</item>
     </string-array>
-    <string-array name="theme_names">
-        <item>Hot</item>
-        <item>Forest</item>
-        <item>Cold</item>
-    </string-array>
 </resources>
