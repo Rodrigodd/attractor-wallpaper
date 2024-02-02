@@ -9,6 +9,7 @@ edition = "2021"
 serde = ["dep:serde"]
 
 [dependencies]
+log = "0.4.20"
 rand = { version = "0.8.5", default-features = false, features = [
     "small_rng",
     "std",

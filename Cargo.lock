@@ -250,6 +250,7 @@ dependencies = [
  "egui-winit",
  "env_logger",
  "image",
+ "log",
  "oklab",
  "parking_lot",
  "pollster",
@@ -267,6 +268,7 @@ name = "attractors"
 version = "0.1.0"
 dependencies = [
  "image",
+ "log",
  "rand",
  "serde",
 ]

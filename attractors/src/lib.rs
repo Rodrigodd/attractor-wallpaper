@@ -169,7 +169,7 @@ impl Attractor {
         for _ in 0..tries {
             let mut attractor = Self::random(&mut rng);
             if let Behavior::Chaotic { lyapunov, to } = attractor.check_behavior() {
-                println!("found attractor with lyapunov exponent {}", lyapunov);
+                log::debug!("found attractor with lyapunov exponent {}", lyapunov);
 
                 let area = get_base_area(&attractor);
                 if area < min_area || area > max_area {
@@ -531,11 +531,7 @@ pub fn get_base_intensity(attractor: &Attractor) -> i16 {
     //     false,
     // );
 
-    let m = select_nth(&mut thumbnail[0..count], count * 3 / 4);
-
-    println!("base intensity: {} (count {})", m, count);
-
-    m
+    select_nth(&mut thumbnail[0..count], count * 3 / 4)
 }
 
 /// Get a reference for the area covered by the attractor.

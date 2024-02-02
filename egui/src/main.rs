@@ -96,6 +96,11 @@ mod cli {
         /// The name of one of the saved themes to use.
         #[arg(short, long)]
         pub theme: Option<String>,
+
+        /// Enable debug logging. Use the `RUST_LOG` environment variable to control the log level.
+        /// By default, the log level is `"info,render=trace,attractor=trace"`.
+        #[arg(short, long)]
+        pub verbose: bool,
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -276,11 +281,13 @@ impl GuiState {
 }
 
 fn main() {
-    env_logger::init_from_env(
-        env_logger::Env::default().default_filter_or("info,render=trace,attractor=trace"),
-    );
-
     let cli = <cli::Cli as clap::Parser>::parse();
+
+    if cli.verbose {
+        env_logger::init_from_env(
+            env_logger::Env::default().default_filter_or("info,render=trace,attractor=trace"),
+        );
+    }
 
     let json = include_str!("default.json");
     let mut attractor_config = serde_json::from_str::<AttractorConfig>(json).unwrap();
@@ -299,6 +306,7 @@ fn main() {
             samples: _,
             set_wallpaper: _,
             theme,
+            verbose: _,
         } = &cli;
 
         let config = &mut attractor_config;
@@ -409,15 +417,18 @@ fn run_headless(mut config: AttractorConfig, mut cli: cli::Cli) {
         image::save_buffer(&output, &bitmap, size.0, size.1, image::ColorType::Rgba8).unwrap();
 
         if cli.set_wallpaper {
-            // kill swaybg
-            println!("killing swaybg");
-            let _ = std::process::Command::new("killall").arg("swaybg").output();
-
-            println!("setting wallpaper");
-            wallpaper::set_from_path(&output).unwrap();
-            println!("wallpaper set");
+            set_wallpaper(&output);
         }
     });
+}
+
+fn set_wallpaper(output: &str) {
+    log::debug!("killing swaybg");
+    let _ = std::process::Command::new("killall").arg("swaybg").output();
+
+    log::debug!("setting wallpaper");
+    wallpaper::set_from_path(output).unwrap();
+    log::info!("wallpaper set");
 }
 
 fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
@@ -540,7 +551,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
                         ..
                     } => match virtual_keycode {
                         VirtualKeyCode::NumpadEnter | VirtualKeyCode::Return if modifiers.alt() => {
-                            println!("toggling fullscreen");
+                            log::debug!("toggling fullscreen");
                             let window = render_state.surface.window();
                             if window.fullscreen().is_some() {
                                 // window.set_decorations(true);
@@ -1165,13 +1176,7 @@ fn build_ui(
                     image::save_buffer(path, &bitmap, size.0, size.1, image::ColorType::Rgba8)
                         .unwrap();
 
-                    // kill swaybg
-                    println!("killing swaybg");
-                    let _ = std::process::Command::new("killall").arg("swaybg").output();
-
-                    println!("setting wallpaper");
-                    wallpaper::set_from_path(path).unwrap();
-                    println!("wallpaper set");
+                    set_wallpaper(path);
                 };
                 executor.spawn(task);
             }
@@ -1187,7 +1192,7 @@ fn build_ui(
 
                 match j {
                     Err(e) => {
-                        println!("Error serializing: {e:?}")
+                        eprintln!("Error serializing: {e:?}")
                     }
                     Ok(x) => {
                         std::fs::write("config.json", x).unwrap();
@@ -1203,7 +1208,7 @@ fn build_ui(
                         let c = match serde_json::from_str::<AttractorConfig>(&json) {
                             Ok(c) => c,
                             Err(e) => {
-                                println!("could not parse json: {}", e);
+                                eprintln!("Error, could not parse json: {}", e);
                                 return;
                             }
                         };
@@ -1225,7 +1230,7 @@ fn build_ui(
                         let _ = attractor_sender.send(AttractorMess::Resize(size));
                         attractor_recv.recv(|_| {});
                     }
-                    _ => println!("could not open config.json"),
+                    Err(err) => eprintln!("could not open config.json: {}", err),
                 };
             }
         });
@@ -1265,7 +1270,7 @@ fn render_frame(
     let texture = match render_state.surface.current_texture() {
         Ok(texture) => texture,
         Err(e) => {
-            eprintln!("Failed to acquire next surface texture: {:?}", e);
+            log::error!("Failed to acquire next surface texture: {:?}", e);
             return;
         }
     };
