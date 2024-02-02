@@ -20,7 +20,7 @@ wallpaper = { git = "https://github.com/Rodrigodd/wallpaper.rs.git", rev = "5733
 glow = { git = "https://github.com/grovesNL/glow.git", rev = "e33eebf7ab3c0a78c0b3a189393cec51f4004d1d" }
 
 # fix fail to build with only `bitmap` feature enable
-ndk = { git = "https://github.com/Rodrigodd/ndk.git", rev = "d0b7451054137640cf94103e146f4d39d8e3fd13" }
+ndk = { git = "https://github.com/rust-mobile/ndk.git", rev = "a4b2e508319eb84e8661364f59dcaffaa85afe91" }
 
 [profile.dev.package."*"]
 opt-level = 3

@@ -1510,7 +1510,7 @@ dependencies = [
 [[package]]
 name = "ndk"
 version = "0.8.0"
-source = "git+https://github.com/Rodrigodd/ndk.git?rev=d0b7451054137640cf94103e146f4d39d8e3fd13#d0b7451054137640cf94103e146f4d39d8e3fd13"
+source = "git+https://github.com/rust-mobile/ndk.git?rev=a4b2e508319eb84e8661364f59dcaffaa85afe91#a4b2e508319eb84e8661364f59dcaffaa85afe91"
 dependencies = [
  "bitflags 2.4.0",
  "jni-sys",
@@ -1540,7 +1540,7 @@ dependencies = [
 [[package]]
 name = "ndk-sys"
 version = "0.5.0+25.2.9519653"
-source = "git+https://github.com/Rodrigodd/ndk.git?rev=d0b7451054137640cf94103e146f4d39d8e3fd13#d0b7451054137640cf94103e146f4d39d8e3fd13"
+source = "git+https://github.com/rust-mobile/ndk.git?rev=a4b2e508319eb84e8661364f59dcaffaa85afe91#a4b2e508319eb84e8661364f59dcaffaa85afe91"
 dependencies = [
  "jni-sys",
 ]
