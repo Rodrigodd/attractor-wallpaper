@@ -66,10 +66,35 @@ mod gradient_serde {
     }
 }
 
+#[cfg(feature = "serde")]
+mod color_serde {
+    use oklab::OkLch;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(color: &OkLch, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let color = oklab::Srgb::from(*color).to_srgb8();
+        color.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<OkLch, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let color = <oklab::Srgb8>::deserialize(deserializer)?;
+        let color = OkLch::from(color.to_f32());
+        Ok(color)
+    }
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Theme {
+    #[cfg_attr(feature = "serde", serde(with = "color_serde"))]
     pub background_color_1: OkLch,
+    #[cfg_attr(feature = "serde", serde(with = "color_serde"))]
     pub background_color_2: OkLch,
     #[cfg_attr(feature = "serde", serde(with = "gradient_serde"))]
     pub gradient: Gradient<Oklab>,
