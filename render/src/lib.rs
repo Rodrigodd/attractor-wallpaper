@@ -346,6 +346,7 @@ fn square_bounds(width: f64, height: f64, border: f64) -> [f64; 4] {
     [start_x, start_x + size, start_y, start_y + size]
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_render(
     attractor_renderer: &mut AttractorRenderer,
     wgpu_state: &WgpuState,
