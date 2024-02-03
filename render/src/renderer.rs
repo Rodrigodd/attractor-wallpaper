@@ -172,6 +172,8 @@ impl WgpuState {
                         max_compute_workgroup_size_z: 0,
                         max_compute_workgroups_per_dimension: 0,
 
+                        max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d,
+
                         ..Limits::downlevel_defaults()
                     },
                     // limits: Limits::downlevel_webgl2_defaults(),
