@@ -3,6 +3,9 @@ name = "attractor-egui"
 version = "0.1.0"
 edition = "2021"
 
+# this contains `ok-picker` derived code which is GPL-3.0-only
+license = "GPL-3.0-only"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
