@@ -224,7 +224,7 @@ fn on_get_wallpaper(
     config.transform.1[0] *= scale;
     config.transform.1[1] *= scale;
 
-    config.samples_per_iteration = 20_000_000;
+    config.samples_per_iteration = 100_000_000;
 
     let result = render_wallpaper(config);
 

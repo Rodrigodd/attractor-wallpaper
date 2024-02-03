@@ -467,7 +467,7 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
     let mut exp_moving_avg = 0.0;
 
     let mut gui_state = GuiState {
-        total_samples_text: 10_000_000.to_string(),
+        total_samples_text: 50_000_000.to_string(),
         ..GuiState::default()
     };
 
