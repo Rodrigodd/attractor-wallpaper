@@ -4,6 +4,31 @@ This is a program for finding strange attractors, as first described by Paul
 Bourke in [this article](http://paulbourke.net/fractals/lyapunov/), and
 rendering them using a color gradient, intended to be used as wallpapers.
 
+# Building
+
+## Attractor-Egui
+
+The main crate is `attractor-egui`, which is a Windows, Linux and Mac OS (MacOs
+is untested) application. To build it, you need to have a recent version of the
+Rust toolchain installed.
+
+```sh
+cargo build -p attractor-egui --release
+```
+
+Or to run it directly:
+
+```sh
+cargo run -p attractor-egui --release
+```
+
+## Android
+
+There is also an Android version. To build it, you can to open the `android`
+folder in Android Studio, and build it from there. You need to have installed
+the Android NDK and SDK (see [build.gradle.kts](android/app/build.gradle.kts)
+for the versions used).
+
 # Acknowledgements
 
 Inspired by:
