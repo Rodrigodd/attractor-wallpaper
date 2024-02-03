@@ -65,6 +65,28 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2,
                     Pair(1.000f, Color.rgb(255, 253, 247))
                 )
             ),
+            "Ocean" to Theme(
+                background_color1 = Color.rgb(78, 202, 224),
+                background_color2 = Color.rgb(25, 25, 95),
+                gradient = arrayOf(
+                    Pair(0.0f, Color.rgb(1, 3, 8)),
+                    Pair(0.019003905f, Color.rgb(2, 8, 24)),
+                    Pair(0.15699217f, Color.rgb(0, 81, 132)),
+                    Pair(0.61249995f, Color.rgb(62, 123, 153)),
+                    Pair(1.0f, Color.rgb(197, 251, 248))
+                )
+            ),
+            "Purple" to Theme(
+                background_color1 = Color.rgb(25, 3, 14),
+                background_color2 = Color.rgb(25, 0, 24),
+                gradient = arrayOf(
+                    Pair(0.0f, Color.rgb(1, 3, 8)),
+                    Pair(0.019003905f, Color.rgb(35, 23, 42)),
+                    Pair(0.3f, Color.rgb(119, 40, 128)),
+                    Pair(0.75f, Color.rgb(202, 175, 255)),
+                    Pair(1.0f, Color.rgb(239, 239, 230))
+                )
+            )
         )
 
         init {
