@@ -4,6 +4,8 @@ This is a program for finding strange attractors, as first described by Paul
 Bourke in [this article](http://paulbourke.net/fractals/lyapunov/), and
 rendering them using a color gradient, intended to be used as wallpapers.
 
+![img](https://github.com/Rodrigodd/attractor-wallpaper/assets/51273772/9ca30b9c-c959-42d2-a413-248bcb0ee3b1)
+
 # Building
 
 ## Attractor-Egui
