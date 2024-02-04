@@ -40,5 +40,5 @@ Inspired by:
 Some of the code is derived from:
 
 - [ok-picker](https://github.com/gagbo/ok-picker/tree/6b36785955b4318a3e75860e56a755ecca7c3967) ([GPL-3.0-only](https://github.com/gagbo/ok-picker/blob/6b36785955b4318a3e75860e56a755ecca7c3967/LICENSES/GPL-3.0-only.txt))
-- [http://jbrd.github.io/2020/12/27/monotone-cubic-interpolation.html]
+- [http://jbrd.github.io/2020/12/27/monotone-cubic-interpolation.html](http://jbrd.github.io/2020/12/27/monotone-cubic-interpolation.html)
 - [http://bottosson.github.io/misc/ok_color.h](http://bottosson.github.io/misc/ok_color.h) ([MIT](https://bottosson.github.io/posts/colorpicker/#license))
