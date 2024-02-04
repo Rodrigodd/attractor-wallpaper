@@ -316,8 +316,10 @@ fn main() {
         if let Some(seed) = seed {
             config.set_seed(*seed);
         } else {
-            config.set_seed(rand::random::<u64>() % 1_000_000);
+            config.set_seed(rand::random::<u64>() % 1_000_000_000);
         }
+
+        println!("using seed {}", config.seed);
 
         config.intensity = *intensity;
         config.exponent = *exponent;
