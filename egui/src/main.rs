@@ -81,6 +81,12 @@ mod cli {
         #[arg(short, long)]
         pub output: Option<String>,
 
+        /// The number of images to generate. The seed of each image will be incremented by one.
+        /// If the output name contains a `{}` token, it will be replaced by the image number,
+        /// otherwise, the image number will be prepended to the output name.
+        #[arg(short, long, requires("output"))]
+        pub count: Option<u32>,
+
         /// The dimensions of the spawned window, or the size of the output image in headless mode.
         #[arg(short, long, default_value = "512x512", value_parser = size_value_parser, conflicts_with = "fullscreen")]
         pub dimensions: winit::dpi::PhysicalSize<u32>,
@@ -302,6 +308,7 @@ fn main() {
             exponent,
             multisampling,
             output: _,
+            count: _,
             dimensions: _,
             samples: _,
             set_wallpaper: _,
@@ -370,58 +377,78 @@ fn run_headless(mut config: AttractorConfig, mut cli: cli::Cli) {
     let multithreaded = config.multithreading;
     let multisampling = config.multisampling;
 
-    let mut attractor = AttractorCtx::new(Arc::new(Mutex::new(config)));
+    let count = cli.count.unwrap_or(1);
 
-    attractor.resize((cli.dimensions.width, cli.dimensions.height), multisampling);
+    let seed = config.seed;
 
-    aggregate_buffer(multithreaded, &mut attractor);
+    for i in 0..count {
+        config.set_seed(seed.wrapping_add(i as u64));
 
-    let AttractorCtx {
-        bitmap,
-        total_samples,
-        config,
-        ..
-    } = attractor;
+        let config = Arc::new(Mutex::new(config.clone()));
 
-    let config = Arc::try_unwrap(config).unwrap().into_inner();
+        let mut attractor = AttractorCtx::new(config);
 
-    let AttractorConfig {
-        size,
-        base_intensity,
-        multisampling,
-        anti_aliasing,
-        gradient,
-        intensity,
-        exponent,
-        background_color_1,
-        background_color_2,
-        transform: (mat, _),
-        ..
-    } = config;
+        attractor.resize((cli.dimensions.width, cli.dimensions.height), multisampling);
 
-    pollster::block_on(async move {
-        let bitmap = render_to_bitmap(
-            size,
-            multisampling,
+        aggregate_buffer(multithreaded, &mut attractor);
+
+        let output = if cli.count.is_some() {
+            if output.contains("{}") {
+                output.replace("{}", &i.to_string())
+            } else {
+                i.to_string() + &output
+            }
+        } else {
+            output.clone()
+        };
+
+        let AttractorCtx {
             bitmap,
-            base_intensity,
-            mat,
             total_samples,
+            config,
+            ..
+        } = attractor;
+
+        let config = Arc::try_unwrap(config).unwrap().into_inner();
+
+        let AttractorConfig {
+            size,
+            base_intensity,
+            multisampling,
             anti_aliasing,
             gradient,
-            background_color_1,
-            background_color_2,
             intensity,
             exponent,
-        )
-        .await;
+            background_color_1,
+            background_color_2,
+            transform: (mat, _),
+            ..
+        } = config;
 
-        image::save_buffer(&output, &bitmap, size.0, size.1, image::ColorType::Rgba8).unwrap();
+        pollster::block_on(async move {
+            let bitmap = render_to_bitmap(
+                size,
+                multisampling,
+                bitmap,
+                base_intensity,
+                mat,
+                total_samples,
+                anti_aliasing,
+                gradient,
+                background_color_1,
+                background_color_2,
+                intensity,
+                exponent,
+            )
+            .await;
 
-        if cli.set_wallpaper {
-            set_wallpaper(&output);
-        }
-    });
+            image::save_buffer(&output, &bitmap, size.0, size.1, image::ColorType::Rgba8).unwrap();
+
+            if cli.set_wallpaper {
+                set_wallpaper(&output);
+            }
+        });
+    }
 }
 
 fn set_wallpaper(output: &str) {
