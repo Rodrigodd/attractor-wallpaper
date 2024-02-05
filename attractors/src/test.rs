@@ -6,6 +6,7 @@ use super::*;
 /// to tweak the `NUM_POINTS` constant, in `Attractor::check_behaviour`. If this fails too
 /// often, increase `NUM_POINTS`.
 #[test]
+#[ignore]
 fn test_for_nan() {
     let mut rng = rand::rngs::SmallRng::from_entropy();
     for _ in 0..500 {

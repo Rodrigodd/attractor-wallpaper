@@ -744,7 +744,7 @@ fn lanczos_kernel_identity() {
 
 #[test]
 fn lanczos_kernel_2x() {
-    let (kernel, side) = lanczos_kernel(2, 3);
+    let (kernel, side) = lanczos_kernel(2, 1);
     assert_eq!(side, 2 * 2 - 1);
 
     println!("{:.2?}", kernel.chunks(side).collect::<Vec<_>>());
