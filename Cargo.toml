@@ -14,7 +14,7 @@ resolver = "2"
 
 # windows fixes, in `attractor-wallpaper-fixes` branch
 # TODO: update this when "https://github.com/reujab/wallpaper.rs/pull/26" gets merged (if ever).
-wallpaper = { git = "https://github.com/Rodrigodd/wallpaper.rs.git", rev = "5733320aca9349bcf06c727250dac5ec6c6b5f42" }
+wallpaper = { git = "https://github.com/Rodrigodd/wallpaper.rs.git", rev = "3d64610786c4f48a1bd4c6e1526d84b1abcf2c71" }
 
 # fix panic on invalid utf-8 strings in error handler, on android
 glow = { git = "https://github.com/grovesNL/glow.git", rev = "e33eebf7ab3c0a78c0b3a189393cec51f4004d1d" }
