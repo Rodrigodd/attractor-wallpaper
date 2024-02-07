@@ -765,9 +765,6 @@ fn create_render_pipeline(
     pipeline_layout: &wgpu::PipelineLayout,
     multisampling: u8,
 ) -> Result<RenderPipeline, Box<dyn Error>> {
-    #[cfg(not(target_os = "android"))]
-    let mut source = std::fs::read_to_string("render/src/shader.wgsl")?;
-    #[cfg(target_os = "android")]
     let mut source = include_str!("shader.wgsl").to_string();
 
     source = source.replace("MULTISAMPLING", &format!("{}u", multisampling));
