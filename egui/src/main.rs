@@ -1309,7 +1309,7 @@ fn render_frame(
     });
     let screen_descriptor = egui_wgpu::renderer::ScreenDescriptor {
         size_in_pixels: [render_state.surface.size().0, render_state.surface.size().1],
-        pixels_per_point: 1.0,
+        pixels_per_point: egui_ctx.pixels_per_point(),
     };
     render_state.attractor_renderer.update_uniforms(queue);
     render_state.egui_renderer.update_buffers(
