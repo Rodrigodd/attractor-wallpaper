@@ -653,11 +653,14 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
 
                             let delta_a: f64 = a - last_a;
 
+                            let ox = cx * gui_state.multisampling as f64;
+                            let oy = cy * gui_state.multisampling as f64;
+
                             // Rot(x - c) + c => Rot(x) + (c - Rot(c))
                             let mat = [delta_a.cos(), delta_a.sin(), -delta_a.sin(), delta_a.cos()];
                             let trans = [
-                                cx - mat[0] * cx - mat[1] * cy,
-                                cy - mat[2] * cx - mat[3] * cy,
+                                ox - mat[0] * ox - mat[1] * oy,
+                                oy - mat[2] * ox - mat[3] * oy,
                             ];
 
                             let _ = attractor_sender.send(AttractorMess::Transform((mat, trans)));
