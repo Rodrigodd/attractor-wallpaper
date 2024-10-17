@@ -129,9 +129,13 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         override fun onSharedPreferenceChanged(
-            sharedPreferences: SharedPreferences,
-            key: String
+            sharedPreferences: SharedPreferences?,
+            key: String?
         ) {
+            if (sharedPreferences == null || key == null) {
+                Log.w(TAG, "Pref or Key is null: $sharedPreferences, $key");
+                return;
+            }
             when (key) {
                 "seed" -> {
                     val seed = sharedPreferences.getString(key, "0")

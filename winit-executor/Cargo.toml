@@ -7,6 +7,6 @@ edition = "2021"
 
 [dependencies]
 
-winit = "0.28.7"
+winit = "0.30.5"
 log = "0.4.20"
 waker-fn = "1.1.1"

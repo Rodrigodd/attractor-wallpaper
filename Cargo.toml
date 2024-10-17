@@ -1,14 +1,11 @@
 [workspace]
 
-members = [
-    "attractors",
-    "render",
-    "egui",
-    "android/lib",
-    "oklab",
-    "winit-executor",
-]
 resolver = "2"
+
+members = ["attractors", "render", "egui", "oklab", "winit-executor"]
+
+# would love to have it in, but it only works on android, and breaks rust analyzer
+exclude = ["android/lib"]
 
 [patch.crates-io]
 

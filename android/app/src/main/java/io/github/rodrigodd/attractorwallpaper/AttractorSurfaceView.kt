@@ -198,9 +198,15 @@ class AttractorSurfaceView : SurfaceView, SurfaceHolder.Callback2,
         nativeSurfaceRedrawNeeded(nativeCtx, holder.surface)
     }
 
-    override fun onSharedPreferenceChanged(pref: SharedPreferences, key: String) {
+
+    override fun onSharedPreferenceChanged(pref: SharedPreferences?, key: String?) {
         Log.d(TAG, "onSharedPreferenceChanged: $key")
         if (nativeCtx == 0L) return
+
+        if (pref == null || key == null) {
+            Log.w(TAG, "Pref or Key are null: $pref, $key")
+            return;
+        }
 
         when (key) {
             "multisampling" -> {

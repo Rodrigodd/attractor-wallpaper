@@ -1,6 +1,8 @@
 //! JNI bindings to native methods of io.github.rodrigodd.attractorwallpaper.AttractorSurfaceView
 #![allow(non_snake_case)]
 
+use std::sync::Arc;
+
 use jni::{
     objects::{JClass, JObject, JString},
     sys::{jint, jlong},
@@ -25,7 +27,7 @@ pub extern "system" fn Java_io_github_rodrigodd_attractorwallpaper_AttractorSurf
         return 0;
     };
 
-    let ctx = super::on_create(super::NativeWindow(window));
+    let ctx = super::on_create(Arc::new(super::NativeWindow(window)));
 
     let ctx = match ctx {
         Ok(ctx) => ctx,

@@ -1,6 +1,8 @@
 use android_logger::FilterBuilder;
 use oklab::{OkLch, Oklab, Srgb8};
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use raw_window_handle::{
+    HasDisplayHandle, HasRawDisplayHandle, HasRawWindowHandle, HasWindowHandle,
+};
 use render::gradient::Gradient;
 use render::{
     render_to_bitmap, update_render, AttractorConfig, AttractorCtx, AttractorMess,
@@ -87,7 +89,7 @@ struct Context {
     config: Arc<Mutex<AttractorConfig>>,
 }
 
-fn on_create(window: NativeWindow) -> Result<Box<Context>, Box<dyn Error>> {
+fn on_create(window: Arc<NativeWindow>) -> Result<Box<Context>, Box<dyn Error>> {
     let (sender, receiver) = std::sync::mpsc::channel();
 
     let mut render_state = pollster::block_on(build_renderer(window))?;
@@ -475,14 +477,32 @@ fn main_loop(
 }
 
 struct NativeWindow(ndk::native_window::NativeWindow);
-unsafe impl HasRawWindowHandle for NativeWindow {
-    fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
-        self.0.raw_window_handle()
+// unsafe impl HasRawWindowHandle for NativeWindow {
+//     fn raw_window_handle(
+//         &self,
+//     ) -> Result<raw_window_handle::RawWindowHandle, raw_window_handle::HandleError> {
+//         Ok(self.0.raw_window_handle())
+//     }
+// }
+// unsafe impl HasRawDisplayHandle for NativeWindow {
+//     fn raw_display_handle(
+//         &self,
+//     ) -> Result<raw_window_handle::RawDisplayHandle, raw_window_handle::HandleError> {
+//         Ok(raw_window_handle::AndroidDisplayHandle::new())
+//     }
+// }
+impl HasDisplayHandle for NativeWindow {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
+        Ok(raw_window_handle::DisplayHandle::android())
     }
 }
-unsafe impl HasRawDisplayHandle for NativeWindow {
-    fn raw_display_handle(&self) -> raw_window_handle::RawDisplayHandle {
-        raw_window_handle::AndroidDisplayHandle::empty().into()
+impl HasWindowHandle for NativeWindow {
+    fn window_handle(
+        &self,
+    ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
+        self.0.window_handle()
     }
 }
 impl ops::Deref for NativeWindow {
@@ -494,11 +514,11 @@ impl ops::Deref for NativeWindow {
 
 struct RenderState {
     wgpu_state: WgpuState,
-    surface: SurfaceState<NativeWindow>,
+    surface: SurfaceState<Arc<NativeWindow>>,
     attractor_renderer: AttractorRenderer,
 }
 
-async fn build_renderer(window: NativeWindow) -> Result<RenderState, Box<dyn Error>> {
+async fn build_renderer(window: Arc<NativeWindow>) -> Result<RenderState, Box<dyn Error>> {
     let size = (window.width() as u32, window.height() as u32);
     let (wgpu_state, surface) = WgpuState::new_windowed(window, size).await?;
     let attractor_renderer = AttractorRenderer::new(

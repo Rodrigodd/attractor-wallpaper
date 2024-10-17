@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use wgpu::{
     util::{BufferInitDescriptor, DeviceExt},
     Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
@@ -10,16 +10,16 @@ use wgpu::{
     PipelineLayoutDescriptor, PolygonMode, PowerPreference, PrimitiveState, PrimitiveTopology,
     Queue, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline,
     RenderPipelineDescriptor, RequestAdapterOptions, ShaderModuleDescriptor, ShaderSource,
-    ShaderStages, Surface, SurfaceConfiguration, TextureUsages, VertexState,
+    ShaderStages, Surface, SurfaceConfiguration, TextureUsages, VertexState, WasmNotSendSync,
 };
 
-pub struct SurfaceState<W: HasRawWindowHandle + HasRawDisplayHandle> {
-    surface: Surface,
+pub struct SurfaceState<W: HasWindowHandle + HasDisplayHandle + WasmNotSendSync> {
+    surface: Surface<'static>,
     // SAFETY: window must come after surface, because surface must be dropped before window.
     window: W,
     config: SurfaceConfiguration,
 }
-impl<W: HasRawWindowHandle + HasRawDisplayHandle> SurfaceState<W> {
+impl<W: HasWindowHandle + HasDisplayHandle + WasmNotSendSync + 'static + Clone> SurfaceState<W> {
     fn new(window: W, size: (u32, u32), instance: &Instance) -> Self {
         let config = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
@@ -29,11 +29,12 @@ impl<W: HasRawWindowHandle + HasRawDisplayHandle> SurfaceState<W> {
             present_mode: wgpu::PresentMode::AutoVsync,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
+            desired_maximum_frame_latency: 2,
         };
         Self {
             // SAFETY: The surface need to be dropped before the window. This is ensured by owning the
             // window in the struct and by the order of the fields.
-            surface: unsafe { instance.create_surface(&window).unwrap() },
+            surface: instance.create_surface(window.clone()).unwrap(),
             window,
             config,
         }
@@ -68,6 +69,7 @@ impl<W: HasRawWindowHandle + HasRawDisplayHandle> SurfaceState<W> {
             present_mode: wgpu::PresentMode::AutoVsync,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
+            desired_maximum_frame_latency: 2,
         };
         self.surface.configure(device, &self.config);
     }
@@ -98,7 +100,9 @@ pub struct WgpuState {
     pub queue: Queue,
 }
 impl WgpuState {
-    pub async fn new_windowed<W: HasRawWindowHandle + HasRawDisplayHandle>(
+    pub async fn new_windowed<
+        W: HasWindowHandle + HasDisplayHandle + WasmNotSendSync + 'static + Clone,
+    >(
         window: W,
         size: (u32, u32),
     ) -> Result<(Self, SurfaceState<W>), Box<dyn Error>> {
@@ -109,7 +113,7 @@ impl WgpuState {
 
     pub async fn new_headless() -> Result<Self, Box<dyn Error>> {
         // TODO: This could be replace with the never type (`!`), when it stabilizes.
-        trait HeadlessTrait: HasRawWindowHandle + HasRawDisplayHandle {}
+        trait HeadlessTrait: HasWindowHandle + HasDisplayHandle + WasmNotSendSync + 'static {}
         type Headless = &'static dyn HeadlessTrait;
 
         Self::new(None::<(Headless, _)>)
@@ -120,7 +124,7 @@ impl WgpuState {
             })
     }
 
-    async fn new<W: HasRawWindowHandle + HasRawDisplayHandle>(
+    async fn new<W: HasWindowHandle + HasDisplayHandle + WasmNotSendSync + Clone + 'static>(
         window: Option<(W, (u32, u32))>,
     ) -> Result<(Self, Option<SurfaceState<W>>), Box<dyn Error>> {
         let instance = Instance::new(InstanceDescriptor {
@@ -160,8 +164,8 @@ impl WgpuState {
         let (device, queue) = adapter
             .request_device(
                 &DeviceDescriptor {
-                    features: Features::empty(),
-                    limits: Limits {
+                    required_features: Features::empty(),
+                    required_limits: Limits {
                         // My android device only supports 128 for workgroup_size_y, smaller than
                         // the default 256. But I am not using compute shaders anyway, so keep
                         // everthing as 0 for now.
@@ -176,7 +180,7 @@ impl WgpuState {
 
                         ..Limits::downlevel_defaults()
                     },
-                    // limits: Limits::downlevel_webgl2_defaults(),
+                    memory_hints: Default::default(),
                     label: None,
                 },
                 None,
@@ -456,7 +460,7 @@ impl AttractorRenderer {
         queue.submit(std::iter::once(encoder.finish()));
     }
 
-    pub fn render_aggregate_buffer<'a>(&'a mut self, render_pass: &mut wgpu::RenderPass<'a>) {
+    pub fn render_aggregate_buffer(&mut self, render_pass: &mut wgpu::RenderPass<'_>) {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_bind_group(0, &self.bind_group, &[]);
 
@@ -791,11 +795,13 @@ fn create_render_pipeline(
         vertex: VertexState {
             module: &shader,
             entry_point: "vs_main",
+            compilation_options: Default::default(),
             buffers: &[],
         },
         fragment: Some(FragmentState {
             module: &shader,
             entry_point: "fs_main",
+            compilation_options: Default::default(),
             targets: &[Some(ColorTargetState {
                 format,
                 blend: Some(BlendState::REPLACE),
@@ -818,6 +824,7 @@ fn create_render_pipeline(
             alpha_to_coverage_enabled: false,
         },
         multiview: None,
+        cache: None,
     });
 
     Ok(render_pipeline)

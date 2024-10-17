@@ -9,10 +9,11 @@ use documented::DocumentedFields;
 use egui::{Checkbox, ComboBox, Response, Slider, TextEdit, Ui, Vec2, WidgetText};
 use egui_wgpu::wgpu;
 use egui_winit::winit::{
-    dpi::PhysicalPosition,
-    event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent},
-    event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
-    window::{Window, WindowBuilder},
+    application::ApplicationHandler,
+    dpi::{PhysicalPosition, PhysicalSize},
+    event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent},
+    event_loop::{EventLoop, EventLoopProxy},
+    window::{Window, WindowAttributes},
 };
 use oklab::{LinSrgb, OkLch, Oklab};
 use parking_lot::Mutex;
@@ -23,7 +24,8 @@ use render::{
     AttractorConfig, AttractorCtx, AttractorMess, AttractorRenderer, Multithreading, SavedThemes,
     SurfaceState, Theme, WgpuState,
 };
-use winit::event::{KeyboardInput, ModifiersState, VirtualKeyCode};
+use winit::event::{KeyEvent, Modifiers};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit_executor::{TaskId, WinitExecutor};
 
 use crate::widgets::ok_picker::ToColor32;
@@ -35,6 +37,7 @@ pub mod widgets;
 
 mod cli {
     use clap::Parser;
+    use winit::dpi::PhysicalSize;
 
     #[derive(Parser)]
     #[command(author, version, about, long_about = None)]
@@ -89,7 +92,7 @@ mod cli {
 
         /// The dimensions of the spawned window, or the size of the output image in headless mode.
         #[arg(short, long, default_value = "512x512", value_parser = size_value_parser, conflicts_with = "fullscreen")]
-        pub dimensions: winit::dpi::PhysicalSize<u32>,
+        pub dimensions: PhysicalSize<u32>,
 
         /// The number of samples to render for in headless mode.
         #[arg(long, default_value = "10_000_000", value_parser = parse_integer)]
@@ -125,7 +128,7 @@ mod cli {
         }
     }
 
-    fn size_value_parser(s: &str) -> Result<winit::dpi::PhysicalSize<u32>, String> {
+    fn size_value_parser(s: &str) -> Result<PhysicalSize<u32>, String> {
         let mut parts = s.split('x');
         let width = parts
             .next()
@@ -141,7 +144,7 @@ mod cli {
                 s.parse::<u32>()
                     .map_err(|err| format!("Invalid height: {}", err))
             })?;
-        Ok(winit::dpi::PhysicalSize::new(width, height))
+        Ok(PhysicalSize::new(width, height))
     }
 
     // parse integer with underscores
@@ -161,7 +164,7 @@ mod cli {
     }
 }
 
-async fn build_renderer(window: Window, proxy: EventLoopProxy<UserEvent>) {
+async fn build_renderer(window: Arc<Window>, proxy: EventLoopProxy<UserEvent>) {
     let size = window.inner_size();
     let (wgpu_state, surface) = render::WgpuState::new_windowed(window, (size.width, size.height))
         .await
@@ -175,7 +178,7 @@ async fn build_renderer(window: Window, proxy: EventLoopProxy<UserEvent>) {
     .unwrap();
 
     let egui_renderer =
-        egui_wgpu::Renderer::new(&wgpu_state.device, surface.texture_format(), None, 1);
+        egui_wgpu::Renderer::new(&wgpu_state.device, surface.texture_format(), None, 1, true);
 
     let _ = proxy.send_event(UserEvent::BuildRenderer((
         wgpu_state,
@@ -189,7 +192,7 @@ enum UserEvent {
     BuildRenderer(
         (
             WgpuState,
-            SurfaceState<Window>,
+            SurfaceState<Arc<Window>>,
             AttractorRenderer,
             egui_wgpu::Renderer,
         ),
@@ -200,7 +203,7 @@ enum UserEvent {
 
 struct RenderState {
     wgpu_state: WgpuState,
-    surface: SurfaceState<Window>,
+    surface: SurfaceState<Arc<Window>>,
     attractor_renderer: AttractorRenderer,
     egui_renderer: egui_wgpu::Renderer,
 }
@@ -244,8 +247,8 @@ struct GuiState {
     /// - Single: Use a single thread.
     /// - AtomicMulti: Use a bitmap of AtomicI32's that is rendered by multiple threads.
     /// - MergeMulti: Each thread renders to a separate bitmap, that is merged at the end of each
-    /// iteration. For a big enough number of samples per iteration, this should be the fastest
-    /// method, although the one that consumes more memory.
+    ///   iteration. For a big enough number of samples per iteration, this should be the fastest
+    ///   method, although the one that consumes more memory.
     multithreading: Multithreading,
     /// The number of samples to be generated for each iteration of the attractor. The UI will
     /// block until a the end of a iteration every time the UI is updated/rendered. This value
@@ -283,6 +286,369 @@ impl GuiState {
 
     fn total_samples(&mut self) -> Option<u64> {
         self.total_samples_text.parse::<u64>().ok()
+    }
+}
+
+struct WinitApplication {
+    egui_ctx: egui::Context,
+    egui_state: Option<egui_winit::State>,
+    window: Option<Arc<Window>>,
+    render_state: Option<RenderState>,
+    modifiers: Modifiers,
+    gui_state: GuiState,
+    attractor_sender: Sender<AttractorMess>,
+    attractor_config: Arc<Mutex<AttractorConfig>>,
+    window_start_attributes: WindowAttributes,
+    executor: WinitExecutor<UserEvent>,
+    recv_bitmap: render::channel::Receiver<AttractorCtx>,
+    last_noise: f64,
+    exp_moving_avg: f64,
+    last_change: Instant,
+    proxy: EventLoopProxy<UserEvent>,
+}
+impl WinitApplication {
+    fn update(&mut self) {
+        let mut total_samples = 0;
+        let mut stop_time = Instant::now();
+        let Some(render_state) = self.render_state.as_mut() else {
+            return;
+        };
+        self.recv_bitmap.recv(|at| {
+            let rsize = render_state.attractor_renderer.size;
+            let rsize = [
+                rsize.0 * render_state.attractor_renderer.multisampling as u32,
+                rsize.1 * render_state.attractor_renderer.multisampling as u32,
+            ];
+            let config = at.config.lock();
+            let [width, height] = config.bitmap_size();
+            let asize = [width as u32, height as u32];
+            if asize != rsize {
+                // don't update the bitmap if the attractor has not resized
+                // yet
+                return;
+            }
+
+            if at.total_samples < 100_000 {
+                // don't update bitmap if there is not enough samples yet. This avoids
+                // flickering while draggin the attractor.
+                return;
+            }
+
+            let base_intensity = config.base_intensity as f32;
+            total_samples = at.total_samples;
+            let anti_aliasing = config.anti_aliasing;
+            let mat = config.transform.0;
+
+            // drop lock before doing any heavy computation
+            drop(config);
+
+            if at.stop_time.is_none() {
+                let noise = attractors::estimate_noise(&at.bitmap, width, height);
+                let diff = noise - self.last_noise;
+                self.last_noise = noise;
+
+                let exp = 0.03;
+                self.exp_moving_avg = self.exp_moving_avg * (1.0 - exp) + diff * 0.03;
+            }
+
+            at.bitmap[0] = render::get_intensity(base_intensity, mat, total_samples, anti_aliasing);
+            render_state
+                .attractor_renderer
+                .load_aggregate_buffer(&render_state.wgpu_state.queue, &at.bitmap);
+
+            self.last_change = at.last_change;
+            if let Some(x) = at.stop_time {
+                stop_time = x;
+            } else {
+                stop_time = Instant::now();
+            }
+        });
+
+        let Some(egui_state) = self.egui_state.as_mut() else {
+            return;
+        };
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+
+        let new_input = egui_state.take_egui_input(window);
+
+        let mut full_output = self.egui_ctx.run(new_input, |ui| {
+            egui::Window::new("Configuration")
+                .resizable(true)
+                .scroll([false, true])
+                .show(ui, |ui| {
+                    build_ui(
+                        ui,
+                        &self.proxy,
+                        &mut self.gui_state,
+                        &self.attractor_sender,
+                        &mut self.recv_bitmap,
+                        &self.attractor_config,
+                        total_samples,
+                        stop_time - self.last_change,
+                        self.exp_moving_avg,
+                        render_state,
+                        &mut self.executor,
+                    );
+                    // ui.allocate_space(ui.available_size());
+                });
+        });
+
+        let window = render_state.surface.window();
+        let view_output = full_output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .unwrap();
+        if view_output.repaint_delay == Duration::ZERO {
+            window.request_redraw();
+        }
+
+        egui_state.handle_platform_output(window, full_output.platform_output.take());
+
+        render_frame(&self.egui_ctx, full_output, render_state);
+    }
+}
+impl ApplicationHandler<UserEvent> for WinitApplication {
+    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        let window = event_loop
+            .create_window(self.window_start_attributes.clone())
+            .unwrap();
+
+        let egui_state = egui_winit::State::new(
+            self.egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            &window,
+            None,
+            None,
+            None,
+        );
+
+        let window = Arc::new(window);
+
+        let task = build_renderer(window.clone(), self.proxy.clone());
+
+        self.window = Some(window);
+        self.egui_state = Some(egui_state);
+        self.executor.spawn(task);
+    }
+
+    fn user_event(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, event: UserEvent) {
+        match event {
+            UserEvent::PollTask(id) => self.executor.poll(id),
+            UserEvent::BuildRenderer((
+                wgpu_state,
+                surface,
+                mut attractor_renderer,
+                egui_renderer,
+            )) => {
+                update_render(
+                    &mut attractor_renderer,
+                    &wgpu_state,
+                    &self.gui_state.gradient,
+                    self.gui_state.multisampling,
+                    self.gui_state.background_color_1,
+                    self.gui_state.background_color_2,
+                    self.gui_state.intensity,
+                    self.gui_state.exponent,
+                );
+                self.render_state = Some(RenderState {
+                    wgpu_state,
+                    surface,
+                    attractor_renderer,
+                    egui_renderer,
+                });
+            }
+            UserEvent::WallpaperFinishedRendering => self.update(),
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+        self.update();
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        let Some(egui_state) = self.egui_state.as_mut() else {
+            return;
+        };
+
+        if window_id != window.id() {
+            return;
+        }
+
+        let res = egui_state.on_window_event(window, &event);
+
+        if res.repaint {
+            window.request_redraw();
+        }
+        if res.consumed {
+            return;
+        }
+
+        match event {
+            WindowEvent::ModifiersChanged(m) => self.modifiers = m,
+            WindowEvent::KeyboardInput {
+                // input:
+                //     KeyboardInput {
+                //         state: ElementState::Pressed,
+                //         virtual_keycode: Some(virtual_keycode),
+                //         ..
+                //     },
+                event:
+                    KeyEvent {
+                        // logical_key: Key::Named(named_key),
+                        physical_key: PhysicalKey::Code(key),
+                        ..
+                    },
+                ..
+            } => match key {
+                KeyCode::Enter | KeyCode::NumpadEnter if self.modifiers.state().alt_key() => {
+                    log::debug!("toggling fullscreen");
+                    if window.fullscreen().is_some() {
+                        // window.set_decorations(true);
+                        window.set_fullscreen(None);
+                    } else {
+                        // window.set_decorations(false);
+                        // window.set_fullscreen(Some(
+                        //     winit::window::Fullscreen::Borderless(None),
+                        // ));
+                        if let Some(monitor) = window.current_monitor() {
+                            window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(
+                                Some(monitor),
+                            )));
+                        } else {
+                            window
+                                .set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+                        }
+                    }
+                }
+                KeyCode::KeyQ => event_loop.exit(),
+                _ => {}
+            },
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => match state {
+                ElementState::Pressed => self.gui_state.dragging = true,
+                ElementState::Released => self.gui_state.dragging = false,
+            },
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Right,
+                ..
+            } => match state {
+                ElementState::Pressed => self.gui_state.rotating = true,
+                ElementState::Released => self.gui_state.rotating = false,
+            },
+            WindowEvent::CursorLeft { .. } => {
+                self.gui_state.dragging = false;
+                self.gui_state.rotating = false;
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if self.gui_state.dragging {
+                    let delta_x = position.x - self.gui_state.last_cursor_position.x;
+                    let delta_y = position.y - self.gui_state.last_cursor_position.y;
+
+                    let mat = [1.0, 0.0, 0.0, 1.0];
+                    let trans = [
+                        -delta_x * self.gui_state.multisampling as f64,
+                        -delta_y * self.gui_state.multisampling as f64,
+                    ];
+
+                    let _ = self
+                        .attractor_sender
+                        .send(AttractorMess::Transform((mat, trans)));
+                } else if self.gui_state.rotating {
+                    let Some(render_state) = self.render_state.as_ref() else {
+                        return;
+                    };
+                    let size = render_state.surface.size();
+                    let cx = size.0 as f64 / 2.0;
+                    let cy = size.1 as f64 / 2.0;
+
+                    let ldx = self.gui_state.last_cursor_position.y - cy;
+                    let ldy = self.gui_state.last_cursor_position.x - cx;
+                    let last_a = f64::atan2(ldx, ldy);
+
+                    let dx = position.y - cy;
+                    let dy = position.x - cx;
+                    let a = f64::atan2(dx, dy);
+
+                    let delta_a: f64 = a - last_a;
+
+                    let ox = cx * self.gui_state.multisampling as f64;
+                    let oy = cy * self.gui_state.multisampling as f64;
+
+                    // Rot(x - c) + c => Rot(x) + (c - Rot(c))
+                    let mat = [delta_a.cos(), delta_a.sin(), -delta_a.sin(), delta_a.cos()];
+                    let trans = [
+                        ox - mat[0] * ox - mat[1] * oy,
+                        oy - mat[2] * ox - mat[3] * oy,
+                    ];
+
+                    let _ = self
+                        .attractor_sender
+                        .send(AttractorMess::Transform((mat, trans)));
+                }
+                self.gui_state.last_cursor_position = position;
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let delta = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y as f64 * 12.0,
+                    MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => y,
+                };
+
+                let s = (-delta * 0.02).exp2();
+
+                let multisampling = self.attractor_config.lock().multisampling;
+                let [x, y] = [
+                    self.gui_state.last_cursor_position.x * multisampling as f64,
+                    self.gui_state.last_cursor_position.y * multisampling as f64,
+                ];
+
+                // S(x - c) + c => S(x) + (c - S(c))
+                //              => s*x + (1 - s)*c
+                let cs = 1.0 - s;
+
+                let mat = [s, 0.0, 0.0, s];
+                let trans = [x * cs, y * cs];
+
+                let _ = self
+                    .attractor_sender
+                    .send(AttractorMess::Transform((mat, trans)));
+            }
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::Resized(new_size) => {
+                if new_size.width == 0 || new_size.height == 0 {
+                    return;
+                }
+
+                let _ = self
+                    .attractor_sender
+                    .send(AttractorMess::Resize((new_size.width, new_size.height)));
+
+                let new_size = (new_size.width, new_size.height);
+                let Some(render_state) = self.render_state.as_mut() else {
+                    return;
+                };
+                render_state
+                    .attractor_renderer
+                    .resize(&render_state.wgpu_state.device, new_size);
+                render_state
+                    .surface
+                    .resize(new_size, &render_state.wgpu_state.device);
+            }
+            _ => (),
+        }
     }
 }
 
@@ -353,102 +719,136 @@ fn main() {
     run_ui(attractor_config, cli.fullscreen);
 }
 
-fn run_headless(mut config: AttractorConfig, mut cli: cli::Cli) {
-    if cli.fullscreen {
-        let ev = winit::event_loop::EventLoop::new();
-        let monitor = match ev.primary_monitor() {
-            Some(x) => x,
-            None => {
-                let Some(x) = ev.available_monitors().next() else {
-                    println!("ERROR: No monitors found");
-                    std::process::exit(1)
-                };
-                println!("WARN: No primary monitor found, falling back to first avaliable monitor");
-                x
+struct HeadlessApplication {
+    config: AttractorConfig,
+    cli: Option<cli::Cli>,
+}
+impl ApplicationHandler for HeadlessApplication {
+    fn resumed(&mut self, ev: &winit::event_loop::ActiveEventLoop) {
+        let mut cli = self.cli.take().unwrap();
+
+        if cli.fullscreen {
+            // let monitor = match ev.primary_monitor() {
+            //     Some(x) => x,
+            //     None => {
+            //         let Some(x) = ev.available_monitors().next() else {
+            //             println!("ERROR: No monitors found");
+            //             std::process::exit(1)
+            //         };
+            //         println!(
+            //             "WARN: No primary monitor found, falling back to first avaliable monitor"
+            //         );
+            //         x
+            //     }
+            // };
+            // cli.dimensions = monitor.size();
+            let mut size = PhysicalSize::new(0, 0);
+            for monitor in ev.available_monitors() {
+                println!("size: {}x{}", monitor.size().width, monitor.size().height);
+                size.width = monitor.size().width.max(size.width);
+                size.height = monitor.size().height.max(size.height);
             }
-        };
-        cli.dimensions = monitor.size();
-    }
+            cli.dimensions = size;
+        }
 
-    config.samples_per_iteration = cli.samples;
+        self.config.samples_per_iteration = cli.samples;
 
-    let output = cli.output.unwrap();
+        let output = cli.output.unwrap();
 
-    let multithreaded = config.multithreading;
-    let multisampling = config.multisampling;
+        let multithreaded = self.config.multithreading;
+        let multisampling = self.config.multisampling;
 
-    let count = cli.count.unwrap_or(1);
+        let count = cli.count.unwrap_or(1);
 
-    let seed = config.seed;
+        let seed = self.config.seed;
 
-    for i in 0..count {
-        config.set_seed(seed.wrapping_add(i as u64));
+        for i in 0..count {
+            self.config.set_seed(seed.wrapping_add(i as u64));
 
-        let config = Arc::new(Mutex::new(config.clone()));
+            let config = Arc::new(Mutex::new(self.config.clone()));
 
-        let mut attractor = AttractorCtx::new(config);
+            let mut attractor = AttractorCtx::new(config);
 
-        attractor.resize((cli.dimensions.width, cli.dimensions.height), multisampling);
+            attractor.resize((cli.dimensions.width, cli.dimensions.height), multisampling);
 
-        aggregate_buffer(multithreaded, &mut attractor);
+            aggregate_buffer(multithreaded, &mut attractor);
 
-        let output = if cli.count.is_some() {
-            if output.contains("{}") {
-                output.replace("{}", &i.to_string())
+            let output = if cli.count.is_some() {
+                if output.contains("{}") {
+                    output.replace("{}", &i.to_string())
+                } else {
+                    i.to_string() + &output
+                }
             } else {
-                i.to_string() + &output
-            }
-        } else {
-            output.clone()
-        };
+                output.clone()
+            };
 
-        let AttractorCtx {
-            bitmap,
-            total_samples,
-            config,
-            ..
-        } = attractor;
-
-        let config = Arc::try_unwrap(config).unwrap().into_inner();
-
-        let AttractorConfig {
-            size,
-            base_intensity,
-            multisampling,
-            anti_aliasing,
-            gradient,
-            intensity,
-            exponent,
-            background_color_1,
-            background_color_2,
-            transform: (mat, _),
-            ..
-        } = config;
-
-        pollster::block_on(async move {
-            let bitmap = render_to_bitmap(
-                size,
-                multisampling,
+            let AttractorCtx {
                 bitmap,
-                base_intensity,
-                mat,
                 total_samples,
+                config,
+                ..
+            } = attractor;
+
+            let config = Arc::try_unwrap(config).unwrap().into_inner();
+
+            let AttractorConfig {
+                size,
+                base_intensity,
+                multisampling,
                 anti_aliasing,
                 gradient,
-                background_color_1,
-                background_color_2,
                 intensity,
                 exponent,
-            )
-            .await;
+                background_color_1,
+                background_color_2,
+                transform: (mat, _),
+                ..
+            } = config;
 
-            image::save_buffer(&output, &bitmap, size.0, size.1, image::ColorType::Rgba8).unwrap();
+            pollster::block_on(async move {
+                let bitmap = render_to_bitmap(
+                    size,
+                    multisampling,
+                    bitmap,
+                    base_intensity,
+                    mat,
+                    total_samples,
+                    anti_aliasing,
+                    gradient,
+                    background_color_1,
+                    background_color_2,
+                    intensity,
+                    exponent,
+                )
+                .await;
 
-            if cli.set_wallpaper {
-                set_wallpaper(&output);
-            }
-        });
+                image::save_buffer(&output, &bitmap, size.0, size.1, image::ColorType::Rgba8)
+                    .unwrap();
+
+                if cli.set_wallpaper {
+                    set_wallpaper(&output);
+                }
+            });
+        }
     }
+
+    fn window_event(
+        &mut self,
+        _event_loop: &winit::event_loop::ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        _event: WindowEvent,
+    ) {
+    }
+}
+
+fn run_headless(config: AttractorConfig, cli: cli::Cli) {
+    let ev = winit::event_loop::EventLoop::new().unwrap();
+    ev.run_app(&mut HeadlessApplication {
+        config,
+        cli: Some(cli),
+    })
+    .unwrap()
 }
 
 fn set_wallpaper(output: &str) {
@@ -461,39 +861,22 @@ fn set_wallpaper(output: &str) {
 }
 
 fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
-    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    let event_loop = EventLoop::<UserEvent>::with_user_event().build().unwrap();
 
-    let size = egui_winit::winit::dpi::PhysicalSize::<u32>::new(800, 600);
+    let size = PhysicalSize::<u32>::new(800, 600);
 
-    let wb = WindowBuilder::new()
+    let window_start_attributes = WindowAttributes::default()
         .with_title("Attractor Wallpaper")
-        .with_inner_size(size);
-
-    #[cfg(target = "linux")]
-    let wb = { wb.with_name("attractor-wallpaper", "") };
-
-    let wb = if fullscreen {
-        wb.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)))
-    } else {
-        wb
-    };
-
-    let window = wb.build(&event_loop).unwrap();
+        .with_inner_size(size)
+        .with_fullscreen(if fullscreen {
+            Some(winit::window::Fullscreen::Borderless(None))
+        } else {
+            None
+        });
 
     let egui_ctx = egui::Context::default();
 
-    let mut executor = WinitExecutor::new(event_loop.create_proxy(), UserEvent::PollTask);
-
-    let mut egui_state = egui_winit::State::new(egui::ViewportId::ROOT, &window, None, None);
-
-    let task = build_renderer(window, event_loop.create_proxy());
-    executor.spawn(task);
-
-    let mut render_state = None;
-    let mut last_change = Instant::now();
-
-    let mut last_noise = 0.0;
-    let mut exp_moving_avg = 0.0;
+    let executor = WinitExecutor::new(event_loop.create_proxy(), UserEvent::PollTask);
 
     let mut gui_state = GuiState {
         total_samples_text: 50_000_000.to_string(),
@@ -507,309 +890,34 @@ fn run_ui(attractor_config: AttractorConfig, fullscreen: bool) {
     // let mut attractor = AttractorCtx::new(&mut gui_state, size);
 
     let (attractor_sender, recv_conf) = std::sync::mpsc::channel::<AttractorMess>();
-    let (sender_bitmap, mut recv_bitmap) = render::channel::channel::<AttractorCtx>();
+    let (sender_bitmap, recv_bitmap) = render::channel::channel::<AttractorCtx>();
     let attractor = AttractorCtx::new(attractor_config.clone());
 
     std::thread::spawn(move || attractor_thread(recv_conf, attractor, sender_bitmap));
 
     // attractor.send_mess = Some(sender_conf);
 
-    let mut modifiers = ModifiersState::empty();
-
     let proxy = event_loop.create_proxy();
 
-    event_loop.run(move |event, _, control_flow| {
-        // control_flow is a reference to an enum which tells us how to run the event loop.
-        // See the docs for details: https://docs.rs/winit/0.22.2/winit/enum.ControlFlow.html
-        *control_flow = ControlFlow::Wait;
-
-        match event {
-            Event::UserEvent(UserEvent::PollTask(id)) => return executor.poll(id),
-            Event::UserEvent(UserEvent::BuildRenderer((
-                wgpu_state,
-                surface,
-                mut attractor_renderer,
-                egui_renderer,
-            ))) => {
-                update_render(
-                    &mut attractor_renderer,
-                    &wgpu_state,
-                    &gui_state.gradient,
-                    gui_state.multisampling,
-                    gui_state.background_color_1,
-                    gui_state.background_color_2,
-                    gui_state.intensity,
-                    gui_state.exponent,
-                );
-                render_state = Some(RenderState {
-                    wgpu_state,
-                    surface,
-                    attractor_renderer,
-                    egui_renderer,
-                });
-                return;
-            }
-            _ => {}
-        }
-
-        let Some(render_state) = render_state.as_mut() else {
-            return;
-        };
-        let window = render_state.surface.window();
-
-        match event {
-            Event::WindowEvent { event, window_id } if window_id == window.id() => {
-                let res = egui_state.on_window_event(&egui_ctx, &event);
-
-                if res.repaint {
-                    window.request_redraw();
-                }
-                if res.consumed {
-                    return;
-                }
-
-                match event {
-                    WindowEvent::ModifiersChanged(m) => modifiers = m,
-                    WindowEvent::KeyboardInput {
-                        input:
-                            KeyboardInput {
-                                state: ElementState::Pressed,
-                                virtual_keycode: Some(virtual_keycode),
-                                ..
-                            },
-                        ..
-                    } => match virtual_keycode {
-                        VirtualKeyCode::NumpadEnter | VirtualKeyCode::Return if modifiers.alt() => {
-                            log::debug!("toggling fullscreen");
-                            let window = render_state.surface.window();
-                            if window.fullscreen().is_some() {
-                                // window.set_decorations(true);
-                                window.set_fullscreen(None);
-                            } else {
-                                // window.set_decorations(false);
-                                // window.set_fullscreen(Some(
-                                //     winit::window::Fullscreen::Borderless(None),
-                                // ));
-                                if let Some(monitor) = window.current_monitor() {
-                                    window.set_fullscreen(Some(
-                                        winit::window::Fullscreen::Borderless(Some(monitor)),
-                                    ));
-                                } else {
-                                    window.set_fullscreen(Some(
-                                        winit::window::Fullscreen::Borderless(None),
-                                    ));
-                                }
-                            }
-                        }
-                        VirtualKeyCode::Q => {
-                            *control_flow = ControlFlow::Exit;
-                        }
-                        _ => {}
-                    },
-                    WindowEvent::MouseInput {
-                        state,
-                        button: MouseButton::Left,
-                        ..
-                    } => match state {
-                        ElementState::Pressed => gui_state.dragging = true,
-                        ElementState::Released => gui_state.dragging = false,
-                    },
-                    WindowEvent::MouseInput {
-                        state,
-                        button: MouseButton::Right,
-                        ..
-                    } => match state {
-                        ElementState::Pressed => gui_state.rotating = true,
-                        ElementState::Released => gui_state.rotating = false,
-                    },
-                    WindowEvent::CursorLeft { .. } => {
-                        gui_state.dragging = false;
-                        gui_state.rotating = false;
-                    }
-                    WindowEvent::CursorMoved { position, .. } => {
-                        if gui_state.dragging {
-                            let delta_x = position.x - gui_state.last_cursor_position.x;
-                            let delta_y = position.y - gui_state.last_cursor_position.y;
-
-                            let mat = [1.0, 0.0, 0.0, 1.0];
-                            let trans = [
-                                -delta_x * gui_state.multisampling as f64,
-                                -delta_y * gui_state.multisampling as f64,
-                            ];
-
-                            let _ = attractor_sender.send(AttractorMess::Transform((mat, trans)));
-                        } else if gui_state.rotating {
-                            let size = render_state.surface.size();
-                            let cx = size.0 as f64 / 2.0;
-                            let cy = size.1 as f64 / 2.0;
-
-                            let ldx = gui_state.last_cursor_position.y - cy;
-                            let ldy = gui_state.last_cursor_position.x - cx;
-                            let last_a = f64::atan2(ldx, ldy);
-
-                            let dx = position.y - cy;
-                            let dy = position.x - cx;
-                            let a = f64::atan2(dx, dy);
-
-                            let delta_a: f64 = a - last_a;
-
-                            let ox = cx * gui_state.multisampling as f64;
-                            let oy = cy * gui_state.multisampling as f64;
-
-                            // Rot(x - c) + c => Rot(x) + (c - Rot(c))
-                            let mat = [delta_a.cos(), delta_a.sin(), -delta_a.sin(), delta_a.cos()];
-                            let trans = [
-                                ox - mat[0] * ox - mat[1] * oy,
-                                oy - mat[2] * ox - mat[3] * oy,
-                            ];
-
-                            let _ = attractor_sender.send(AttractorMess::Transform((mat, trans)));
-                        }
-                        gui_state.last_cursor_position = position;
-                    }
-                    WindowEvent::MouseWheel { delta, .. } => {
-                        let delta = match delta {
-                            MouseScrollDelta::LineDelta(_, y) => y as f64 * 12.0,
-                            MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => y,
-                        };
-
-                        let s = (-delta * 0.02).exp2();
-
-                        let multisampling = attractor_config.lock().multisampling;
-                        let [x, y] = [
-                            gui_state.last_cursor_position.x * multisampling as f64,
-                            gui_state.last_cursor_position.y * multisampling as f64,
-                        ];
-
-                        // S(x - c) + c => S(x) + (c - S(c))
-                        //              => s*x + (1 - s)*c
-                        let cs = 1.0 - s;
-
-                        let mat = [s, 0.0, 0.0, s];
-                        let trans = [x * cs, y * cs];
-
-                        let _ = attractor_sender.send(AttractorMess::Transform((mat, trans)));
-                    }
-                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-                    WindowEvent::Resized(new_size) => {
-                        if new_size.width == 0 || new_size.height == 0 {
-                            return;
-                        }
-
-                        let _ = attractor_sender
-                            .send(AttractorMess::Resize((new_size.width, new_size.height)));
-
-                        let new_size = (new_size.width, new_size.height);
-                        render_state
-                            .attractor_renderer
-                            .resize(&render_state.wgpu_state.device, new_size);
-                        render_state
-                            .surface
-                            .resize(new_size, &render_state.wgpu_state.device);
-                    }
-                    _ => (),
-                }
-            }
-            Event::MainEventsCleared | Event::UserEvent(UserEvent::WallpaperFinishedRendering) => {
-                let mut total_samples = 0;
-                let mut stop_time = Instant::now();
-                recv_bitmap.recv(|at| {
-                    let rsize = render_state.attractor_renderer.size;
-                    let rsize = [
-                        rsize.0 * render_state.attractor_renderer.multisampling as u32,
-                        rsize.1 * render_state.attractor_renderer.multisampling as u32,
-                    ];
-                    let config = at.config.lock();
-                    let [width, height] = config.bitmap_size();
-                    let asize = [width as u32, height as u32];
-                    if asize != rsize {
-                        // don't update the bitmap if the attractor has not resized
-                        // yet
-                        return;
-                    }
-
-                    if at.total_samples < 100_000 {
-                        // don't update bitmap if there is not enough samples yet. This avoids
-                        // flickering while draggin the attractor.
-                        return;
-                    }
-
-                    let base_intensity = config.base_intensity as f32;
-                    total_samples = at.total_samples;
-                    let anti_aliasing = config.anti_aliasing;
-                    let mat = config.transform.0;
-
-                    // drop lock before doing any heavy computation
-                    drop(config);
-
-                    if at.stop_time.is_none() {
-                        let noise = attractors::estimate_noise(&at.bitmap, width, height);
-                        let diff = noise - last_noise;
-                        last_noise = noise;
-
-                        let exp = 0.03;
-                        exp_moving_avg = exp_moving_avg * (1.0 - exp) + diff * 0.03;
-                    }
-
-                    at.bitmap[0] =
-                        render::get_intensity(base_intensity, mat, total_samples, anti_aliasing);
-                    render_state
-                        .attractor_renderer
-                        .load_aggregate_buffer(&render_state.wgpu_state.queue, &at.bitmap);
-
-                    last_change = at.last_change;
-                    if let Some(x) = at.stop_time {
-                        stop_time = x;
-                    } else {
-                        stop_time = Instant::now();
-                    }
-                });
-
-                let new_input = egui_state.take_egui_input(window);
-
-                let mut full_output = egui_ctx.run(new_input, |ui| {
-                    egui::Window::new("Configuration")
-                        .resizable(true)
-                        .scroll2([false, true])
-                        .show(ui, |ui| {
-                            build_ui(
-                                ui,
-                                &proxy,
-                                &mut gui_state,
-                                &attractor_sender,
-                                &mut recv_bitmap,
-                                &attractor_config,
-                                total_samples,
-                                stop_time - last_change,
-                                exp_moving_avg,
-                                render_state,
-                                &mut executor,
-                            );
-                            // ui.allocate_space(ui.available_size());
-                        });
-                });
-
-                let window = render_state.surface.window();
-                let view_output = full_output
-                    .viewport_output
-                    .get(&egui::ViewportId::ROOT)
-                    .unwrap();
-                if view_output.repaint_delay == Duration::ZERO {
-                    window.request_redraw();
-                }
-
-                egui_state.handle_platform_output(
-                    window,
-                    &egui_ctx,
-                    full_output.platform_output.take(),
-                );
-
-                render_frame(&egui_ctx, full_output, render_state);
-            }
-            Event::RedrawRequested(id) if window.id() == id => {}
-            _ => (),
-        }
-    });
+    event_loop
+        .run_app(&mut WinitApplication {
+            egui_ctx,
+            egui_state: None,
+            window: None,
+            render_state: None,
+            modifiers: Modifiers::default(),
+            gui_state,
+            attractor_sender,
+            attractor_config,
+            window_start_attributes,
+            executor,
+            recv_bitmap,
+            last_noise: 0.0,
+            exp_moving_avg: 0.0,
+            last_change: Instant::now(),
+            proxy,
+        })
+        .unwrap();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1310,7 +1418,7 @@ fn render_frame(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("Render Encoder"),
     });
-    let screen_descriptor = egui_wgpu::renderer::ScreenDescriptor {
+    let screen_descriptor = egui_wgpu::ScreenDescriptor {
         size_in_pixels: [render_state.surface.size().0, render_state.surface.size().1],
         pixels_per_point: egui_ctx.pixels_per_point(),
     };
@@ -1338,10 +1446,11 @@ fn render_frame(
     render_state
         .attractor_renderer
         .render_aggregate_buffer(&mut render_pass);
-    render_state
-        .egui_renderer
-        .render(&mut render_pass, &paint_jobs, &screen_descriptor);
-    drop(render_pass);
+    render_state.egui_renderer.render(
+        &mut render_pass.forget_lifetime(),
+        &paint_jobs,
+        &screen_descriptor,
+    );
     queue.submit(std::iter::once(encoder.finish()));
     texture.present();
 }
@@ -1366,12 +1475,12 @@ trait MyInnerResponseExt {
 impl<T> MyInnerResponseExt for egui::InnerResponse<T> {
     fn doc(self, field: &str) -> Response {
         self.response
-            .on_hover_text(GuiState::get_field_comment(field).unwrap())
+            .on_hover_text(GuiState::get_field_docs(field).unwrap())
     }
 }
 impl MyInnerResponseExt for Response {
     fn doc(self, field: &str) -> Response {
-        self.on_hover_text(GuiState::get_field_comment(field).unwrap())
+        self.on_hover_text(GuiState::get_field_docs(field).unwrap())
     }
 }
 
