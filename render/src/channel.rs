@@ -44,17 +44,17 @@ struct Channel<T> {
     waiting_thread: AssertUnwindSafe<UnsafeCell<Thread>>,
     message: AssertUnwindSafe<UnsafeCell<*mut T>>,
 }
-unsafe impl<T: Sync> Send for Channel<T> {}
-unsafe impl<T: Sync> Sync for Channel<T> {}
+unsafe impl<T: Sync + Send> Send for Channel<T> {}
+unsafe impl<T: Sync + Send> Sync for Channel<T> {}
 
-pub struct Sender<T: Sync> {
+pub struct Sender<T: Sync + Send> {
     channel: Arc<Channel<T>>,
 }
-pub struct Receiver<T: Sync> {
+pub struct Receiver<T: Sync + Send> {
     channel: Arc<Channel<T>>,
 }
 
-impl<T: Sync> Sender<T> {
+impl<T: Sync + Send> Sender<T> {
     pub fn is_closed(&self) -> bool {
         let state: ChannelState = self.channel.state.load(Acquire).into();
 
@@ -127,7 +127,7 @@ impl<T: Sync> Sender<T> {
     }
 }
 
-impl<T: Sync> Receiver<T> {
+impl<T: Sync + Send> Receiver<T> {
     /// Receive a message from the sender.
     ///
     /// This will block until the sender sends a message. Unless the sender is droped, in which
@@ -224,7 +224,7 @@ impl<T: Sync> Receiver<T> {
     }
 }
 
-impl<T: Sync> Drop for Sender<T> {
+impl<T: Sync + Send> Drop for Sender<T> {
     fn drop(&mut self) {
         loop {
             let state: ChannelState = self.channel.state.load(Acquire).into();
@@ -273,7 +273,7 @@ impl<T: Sync> Drop for Sender<T> {
     }
 }
 
-impl<T: Sync> Drop for Receiver<T> {
+impl<T: Sync + Send> Drop for Receiver<T> {
     fn drop(&mut self) {
         let state: ChannelState = self.channel.state.load(Acquire).into();
 
@@ -296,7 +296,7 @@ impl<T: Sync> Drop for Receiver<T> {
     }
 }
 
-pub fn channel<T: Sync>() -> (Sender<T>, Receiver<T>) {
+pub fn channel<T: Sync + Send>() -> (Sender<T>, Receiver<T>) {
     let channel = Arc::new(Channel {
         state: AtomicU8::new(ChannelState::Ready as u8),
         // dummy value: should never be read
